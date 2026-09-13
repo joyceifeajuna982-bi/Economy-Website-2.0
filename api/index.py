@@ -56,11 +56,6 @@ def init_db():
         ''')
         db.commit()
 
-# Root Route (Fixes the 404 issue)
-@app.route('/', methods=['GET'])
-def home():
-    return jsonify({"status": "API is running", "message": "Welcome to the API"})
-
 @app.route('/api/products', methods=['GET'])
 def get_products():
     with get_db() as db:
