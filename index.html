@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BizSpark - Local Marketplace</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+    <!-- AUTH MODAL -->
+    <div id="authModal" class="order-box">
+        <div class="order-form">
+            <h2 id="authTitle" class="section-title">Account Login</h2>
+            <p class="subtitle" style="margin-bottom: 16px; color: var(--text-muted);">Please sign in to access BizSpark.</p>
+            <form onsubmit="handleAuth(event)">
+                <div class="form-group">
+                    <label for="authEmail">Email</label>
+                    <input type="email" id="authEmail" placeholder="Email" required>
+                </div>
+                <div class="form-group">
+                    <label for="authPassword">Password</label>
+                    <input type="password" id="authPassword" placeholder="Password" required>
+                </div>
+                <button type="submit" class="btn-submit">Sign In</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MAIN APP CONTENT -->
+    <div id="appContent" style="display: none;">
+        <header class="navbar">
+            <div class="brand-and-search">
+                <div class="brand">
+                    <div class="logo-icon"><i class="fa-solid fa-shapes"></i></div>
+                    <div class="logo-text">
+                        <span class="logo-title">Biz<span>Spark</span></span>
+                    </div>
+                </div>
+                
+                <div class="search-container">
+                    <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                    <input type="text" id="searchInput" placeholder="Search products, shops, or categories...">
+                </div>
+            </div>
+
+            <nav>
+                <ul class="nav-links">
+                    <li><a href="#" class="nav-item active" data-target="marketSection"><i class="fa-solid fa-store"></i> General Market</a></li>
+                    <li><a href="#" class="nav-item" data-target="ownerSection"><i class="fa-solid fa-table-cells-large"></i> Business Owner Hub</a></li>
+                    <li><a href="#" class="nav-item" data-target="shopsSection"><i class="fa-solid fa-user"></i> My Shop</a></li>
+                    <li><a href="#" class="nav-item" data-target="dashboardSection"><i class="fa-solid fa-chart-line"></i> Dashboard</a></li>
+                    <li><a href="#" class="nav-item" data-target="chatSection"><i class="fa-solid fa-lock"></i> Encrypted Messages</a></li>
+                    <li><button id="authBtn" onclick="handleLogout()" class="cart-add-btn" title="Sign Out" style="width: auto; padding: 0 12px;"><i class="fa-solid fa-arrow-right-from-bracket"></i></button></li>
+                </ul>
+            </nav>
+        </header>
+
+        <main class="container">
+            <!-- GENERAL MARKET SECTION -->
+            <section id="marketSection" class="page-section active">
+                <div class="hero">
+                    <h1 class="section-title" style="font-size: 2rem;">Explore Products & Local Businesses</h1>
+                    <p style="color: var(--text-muted); margin-bottom: 12px;">Discover items directly from verified independent vendors.</p>
+                </div>
+                
+                <div id="marketProductsGrid" class="products-grid"></div>
+                <p id="emptyMarketText" class="empty-state">No products found matching your search.</p>
+            </section>
+
+            <!-- PERSONAL SHOPS SECTION -->
+            <section id="shopsSection" class="page-section" style="display: none;">
+                <div class="card" style="display: flex; align-items: center; gap: 20px; margin-bottom: 24px;">
+                    <div id="businessLogo" class="logo-icon" style="width: 56px; height: 56px; font-size: 1.5rem;">B</div>
+                    <div>
+                        <h2 id="displayBusinessName" class="section-title" style="margin-bottom: 4px;">Business Name</h2>
+                        <button class="cart-add-btn" style="width: auto; padding: 6px 14px; font-size: 0.8rem;" onclick="editShopName()">Edit Shop Profile</button>
+                    </div>
+                </div>
+                <div id="myShopProductsGrid" class="products-grid"></div>
+            </section>
+
+            <!-- BUSINESS OWNER HUB SECTION -->
+            <section id="ownerSection" class="page-section" style="display: none;">
+                <div class="dashboard-grid">
+                    <div class="card form-card">
+                        <h2 class="section-title">List a New Product</h2>
+                        <form id="productForm">
+                            <div class="form-group">
+                                <label for="formBusinessName">Business/Shop Name *</label>
+                                <input type="text" id="formBusinessName" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="productName">Product Name *</label>
+                                <input type="text" id="productName" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="productPrice">Price ($) *</label>
+                                <input type="number" id="productPrice" step="0.01" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="productCategory">Category</label>
+                                <input type="text" id="productCategory" placeholder="e.g. Handmade, Fashion">
+                            </div>
+                            <div class="form-group">
+                                <label for="productImage">Product Image *</label>
+                                <div class="file-upload-wrapper">
+                                    <input 
+                                      type="file" 
+                                      id="productImage" 
+                                      name="productImage" 
+                                      accept="image/*" 
+                                      required 
+                                      class="file-input"
+                                    >
+                                    <div class="file-upload-button">
+                                      <i class="fa-solid fa-cloud-arrow-up"></i>
+                                      <span>Choose Image File</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="productDescription">Description</label>
+                                <textarea id="productDescription" rows="3"></textarea>
+                            </div>
+                            <button type="submit" class="btn-submit">Publish Product</button>
+                        </form>
+                    </div>
+                    
+                    <div class="card inventory-card">
+                        <h2 class="section-title">Your Uploaded Items</h2>
+                        <div id="ownerProductsGrid" class="products-grid"></div>
+                        <p id="emptyOwnerText" class="empty-state">You haven't uploaded any products yet.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- DASHBOARD SECTION -->
+            <section id="dashboardSection" class="page-section" style="display: none;">
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 24px;">
+                    <div class="card">
+                        <h2 class="section-title">Total Revenue 💰</h2>
+                        <div class="product-price" id="totalRevenue" style="font-size: 2rem;">$0.00</div>
+                    </div>
+                    <div class="card">
+                        <h2 class="section-title">Orders 🛒</h2>
+                        <div class="product-price" id="orderNum" style="font-size: 2rem; color: #ffffff;">0</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2 class="section-title">Recent Transactions</h2>
+                    <table class="data-table" style="width: 100%; text-align: left; border-collapse: collapse;">
+                        <thead>
+                            <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 0.85rem;">
+                                <th style="padding: 10px;">Customer</th>
+                                <th style="padding: 10px;">Email</th>
+                                <th style="padding: 10px;">Date</th>
+                                <th style="padding: 10px;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="transactionsTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- CHAT SECTION -->
+            <section id="chatSection" class="page-section" style="display: none;">
+                <div class="card">
+                    <h2 class="section-title">Real-Time Encrypted Messaging 🔒</h2>
+                    <div class="chat-container" style="display: grid; grid-template-columns: 240px 1fr; gap: 20px; min-height: 350px;">
+                        <div class="chat-sidebar" style="border-right: 1px solid var(--border-color); padding-right: 16px;">
+                            <h3 style="font-size: 0.95rem; margin-bottom: 8px;">Conversations</h3>
+                            <p style="font-size: 0.85rem; color: var(--text-muted);">Global Market Channel</p>
+                        </div>
+                        <div class="chat-window" style="display: flex; flex-direction: column; justify-content: space-between;">
+                            <div id="chatHeader" class="chat-header" style="font-weight: 700; margin-bottom: 12px;">Global Public Channel</div>
+                            <div id="chatMessages" class="chat-messages" style="flex: 1; margin-bottom: 16px; overflow-y: auto;"></div>
+                            <form id="chatForm" class="chat-input-box" style="display: flex; gap: 10px;">
+                                <input type="text" class="chat-input" id="chatInput" placeholder="Type a message..." required style="flex: 1; padding: 10px; border-radius: var(--radius-md); border: 1px solid var(--border-color); background: var(--bg-input); color: #fff;">
+                                <button type="submit" class="btn-submit" style="width: auto; padding: 0 20px; margin-top: 0;">Send</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Floating Cart Trigger Button -->
+    <button id="cartToggleBtn" class="cart-add-btn" onclick="toggleCartDrawer()" style="position: fixed; bottom: 24px; right: 24px; width: 50px; height: 50px; border-radius: 50%; z-index: 999; background: var(--primary);">
+        🛒 <span id="cartCountBadge" class="cart-badge" style="font-weight: 800; font-size: 0.8rem;">0</span>
+    </button>
+
+    <!-- Slide-out Cart Drawer -->
+    <div id="cartDrawer" class="cart-drawer">
+        <div class="cart-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3 class="section-title" style="margin: 0;">Shopping Cart</h3>
+            <p class="close-btn" onclick="toggleCartDrawer()" style="cursor: pointer; font-size: 1.2rem;">✕</p>
+        </div>
+        <div id="cartItemsList" class="cart-body" style="flex: 1; overflow-y: auto;">
+            <p class="empty-cart-msg" style="color: var(--text-muted);">Your cart is empty.</p>
+        </div>
+        <div class="cart-footer" style="margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+            <div class="cart-total-row" style="display: flex; justify-content: space-between; margin-bottom: 16px;">
+                <span>Subtotal:</span>
+                <strong id="cartSubtotal" class="product-price">$0.00</strong>
+            </div>
+            <button class="btn-submit" onclick="openCheckoutModal()">Proceed to Checkout</button>
+        </div>
+    </div>
+
+    <!-- Checkout Modal -->
+    <div id="checkoutModal" class="order-box" style="display:none;">
+        <div class="order-form">
+            <h3 class="section-title">Complete Order</h3>
+            <p style="color: var(--text-muted); margin-bottom: 16px; font-size: 0.85rem;">Review total and input details to place order.</p>
+            <div id="checkoutSummary" style="margin-bottom: 16px;"></div>
+            <form id="checkoutForm" onsubmit="submitCartOrder(event)">
+                <div class="form-group">
+                    <input type="text" id="custName" placeholder="Full Name" required />
+                </div>
+                <div class="form-group">
+                    <input type="email" id="custEmail" placeholder="Email Address" required />
+                </div>
+                <div class="modal-actions" style="display: flex; gap: 12px; margin-top: 16px;">
+                    <button type="button" class="cart-add-btn" style="flex: 1; width: 100%; height: 42px;" onclick="closeCheckoutModal()">Cancel</button>
+                    <button type="submit" class="btn-submit" style="flex: 1; margin-top: 0;">Pay Now</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
