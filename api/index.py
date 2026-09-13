@@ -56,6 +56,11 @@ def init_db():
         ''')
         db.commit()
 
+# Root Route (Fixes the 404 issue)
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({"status": "API is running", "message": "Welcome to the API"})
+
 @app.route('/api/products', methods=['GET'])
 def get_products():
     with get_db() as db:
@@ -109,15 +114,12 @@ def get_dashboard():
         orders = db.execute('SELECT * FROM orders ORDER BY date DESC').fetchall()
     return jsonify({"transactions": [dict(row) for row in orders]})
 
-if __name__ == '__main__':
+# Initialize DB on start
+try:
     init_db()
+except Exception as e:
+    print("Database initialization note:", e)
+
+if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
-    
-    from flask import Flask
-
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Hello World"
