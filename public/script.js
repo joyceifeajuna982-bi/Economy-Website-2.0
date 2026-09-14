@@ -1,368 +1,185 @@
-const CONFIG = {
-    API_URL: window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
-        ? "http://127.0.0.1:5000/api"
-        : "/api", 
-    STORAGE_KEYS: {
-        TOKEN: "bizspark_token",
-        USER: "bizspark_user",
-        CART: "bizspark_cart"
-    },
-    DEFAULT_IMG: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400"
-};
+// Automatically set backend URL depending on environment
+const API_BASE_URL = (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost')
+  ? 'http://127.0.0.1:5000' 
+  : '';
 
-const AppState = {
-    token: localStorage.getItem(CONFIG.STORAGE_KEYS.TOKEN) || null,
-    user: JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.USER)) || null,
-    cart: JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.CART)) || [],
-    products: [],
-    orders: [],
-    searchQuery: "",
+// Global State
+let cart = [];
+let currentUser = null;
 
-    saveUser(user) {
-        this.user = user;
-        localStorage.setItem(CONFIG.STORAGE_KEYS.USER, JSON.stringify(user));
-    },
-    saveToken(token) {
-        this.token = token;
-        localStorage.setItem(CONFIG.STORAGE_KEYS.TOKEN, token);
-    },
-    saveCart(cart) {
-        this.cart = cart;
-        localStorage.setItem(CONFIG.STORAGE_KEYS.CART, JSON.stringify(cart));
-    }
-};
+document.addEventListener('DOMContentLoaded', () => {
+  // 1. Initial Setup
+  initAuth();
+  initNavigation();
+  initCart();
+  initProductForm();
+  loadProducts();
+});
 
-document.addEventListener("DOMContentLoaded", initApp);
+// --- AUTHENTICATION & LOGIN MODAL ---
+function initAuth() {
+  const loginModal = document.getElementById('loginModal') || document.querySelector('.auth-modal');
+  const loginForm = document.getElementById('loginForm') || document.querySelector('.auth-modal form');
+  const userDisplay = document.getElementById('userDisplay');
 
-function initApp() {
-    const oldCart = localStorage.getItem('bizspark_cart');
-    if (oldCart && oldCart.length > 100000) {
-        localStorage.removeItem('bizspark_cart');
-        AppState.cart = [];
-    }
+  // Check stored user session
+  const savedUser = localStorage.getItem('bizspark_user');
+  if (savedUser) {
+    currentUser = JSON.parse(savedUser);
+    if (loginModal) loginModal.style.display = 'none';
+    if (userDisplay) userDisplay.textContent = currentUser.email;
+  } else {
+    if (loginModal) loginModal.style.display = 'flex';
+  }
 
-    setupNavigation();
-    setupForms();
-    setupSearch();
-
-    if (AppState.token && AppState.user) {
-        unlockSite();
-    } else {
-        lockSite();
-    }
+  if (loginForm) {
+    loginForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const emailInput = loginForm.querySelector('input[type="email"]');
+      if (emailInput && emailInput.value.trim() !== '') {
+        currentUser = { email: emailInput.value.trim() };
+        localStorage.setItem('bizspark_user', JSON.stringify(currentUser));
+        if (loginModal) loginModal.style.display = 'none';
+        if (userDisplay) userDisplay.textContent = currentUser.email;
+      }
+    });
+  }
 }
 
-function lockSite() {
-    const appContent = document.getElementById("appContent");
-    const authModal = document.getElementById("authModal");
-    if (appContent) appContent.style.display = "none";
-    if (authModal) authModal.style.display = "flex";
-}
+// --- NAVIGATION & TABS ---
+function initNavigation() {
+  const navLinks = document.querySelectorAll('.nav-link, [data-tab]');
+  const tabContents = document.querySelectorAll('.tab-content, .page-section');
 
-function unlockSite() {
-    const appContent = document.getElementById("appContent");
-    const authModal = document.getElementById("authModal");
-    if (authModal) authModal.style.display = "none";
-    if (appContent) appContent.style.display = "block";
-    updateUIProfile();
-    fetchProducts();
-    updateCartUI();
-}
-
-async function handleAuth(e) {
-    e.preventDefault();
-    const email = document.getElementById("authEmail").value.trim();
-    if (!email) return showToast("Enter email", "error");
-
-    const bizName = email.split("@")[0] + "'s Shop";
-    AppState.saveToken("token_" + Date.now());
-    AppState.saveUser({ email, businessName: bizName });
-    showToast(`Welcome, ${bizName}!`, "success");
-    unlockSite();
-}
-
-function handleLogout() {
-    AppState.saveToken(null);
-    AppState.saveUser(null);
-    localStorage.removeItem(CONFIG.STORAGE_KEYS.TOKEN);
-    localStorage.removeItem(CONFIG.STORAGE_KEYS.USER);
-    showToast("Signed out", "info");
-    lockSite();
-}
-
-function setupNavigation() {
-    document.querySelectorAll('.nav-item').forEach(link => {
-        link.addEventListener('click', (e) => {
-            e.preventDefault();
-            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-            link.classList.add('active');
-            switchSection(link.dataset.target);
+  navLinks.forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetTab = link.getAttribute('data-tab') || link.getAttribute('href')?.replace('#', '');
+      
+      if (targetTab) {
+        tabContents.forEach(section => {
+          section.style.display = section.id === targetTab ? 'block' : 'none';
         });
+        navLinks.forEach(l => l.classList.remove('active'));
+        link.classList.add('active');
+      }
     });
+  });
 }
 
-function switchSection(id) {
-    document.querySelectorAll('.page-section').forEach(s => s.style.display = 'none');
-    const target = document.getElementById(id);
-    if (target) target.style.display = 'block';
-    if (id === 'dashboardSection') fetchDashboardMetrics();
-}
+// --- SHOPPING CART SYSTEM ---
+function initCart() {
+  const cartBtn = document.getElementById('cartBtn') || document.querySelector('.cart-icon');
+  const cartModal = document.getElementById('cartModal') || document.querySelector('.shopping-cart');
+  const closeCartBtn = document.querySelector('.close-cart') || cartModal?.querySelector('span');
 
-async function fetchProducts() {
-    try {
-        const res = await fetch(`${CONFIG.API_URL}/products`);
-        AppState.products = await res.json();
-        renderGrids();
-    } catch (err) {
-        console.error("Failed to load products:", err);
-        showToast("Failed to load products", "error");
-    }
-}
-
-function renderGrids() {
-    const marketGrid = document.getElementById('marketProductsGrid');
-    const ownerGrid = document.getElementById('ownerProductsGrid');
-    const shopGrid = document.getElementById('myShopProductsGrid');
-    const emptyMarket = document.getElementById('emptyMarketText');
-    const emptyOwner = document.getElementById('emptyOwnerText');
-
-    if (marketGrid) marketGrid.innerHTML = '';
-    if (ownerGrid) ownerGrid.innerHTML = '';
-    if (shopGrid) shopGrid.innerHTML = '';
-
-    const filtered = AppState.products.filter(p =>
-        (p.productName || '').toLowerCase().includes(AppState.searchQuery) ||
-        (p.businessName || '').toLowerCase().includes(AppState.searchQuery) ||
-        (p.category || '').toLowerCase().includes(AppState.searchQuery)
-    );
-
-    if (emptyMarket) emptyMarket.style.display = filtered.length ? 'none' : 'block';
-    filtered.forEach(p => {
-        if (marketGrid) marketGrid.appendChild(createProductCard(p, false));
+  if (cartBtn && cartModal) {
+    cartBtn.addEventListener('click', () => {
+      cartModal.style.display = cartModal.style.display === 'block' ? 'none' : 'block';
     });
+  }
 
-    const myBiz = AppState.user?.businessName?.toLowerCase();
-    const myProducts = AppState.products.filter(p => p.businessName?.toLowerCase() === myBiz);
-
-    if (emptyOwner) emptyOwner.style.display = myProducts.length ? 'none' : 'block';
-    myProducts.forEach(p => {
-        if (ownerGrid) ownerGrid.appendChild(createProductCard(p, true));
-        if (shopGrid) shopGrid.appendChild(createProductCard(p, true));
+  if (closeCartBtn && cartModal) {
+    closeCartBtn.addEventListener('click', () => {
+      cartModal.style.display = 'none';
     });
+  }
 }
 
-function createProductCard(product, isOwner) {
-    const card = document.createElement('div');
-    card.className = 'product-card';
-    const productId = product.id;
-
-    card.innerHTML = `
-        <div class="card-top-content">
-            <div class="media-container">
-                <img src="${product.mediaUrl || CONFIG.DEFAULT_IMG}" class="product-media" alt="Product">
-                <span class="category-tag">${escapeHtml(product.category || 'General')}</span>
-            </div>
-            <div class="product-details">
-                <h3 class="product-title">${escapeHtml(product.productName)}</h3>
-                <p class="product-desc">${escapeHtml(product.description || '')}</p>
-                <div class="vendor-row">
-                    <span class="vendor-name"><i class="fa-solid fa-store"></i> ${escapeHtml(product.businessName)}</span>
-                </div>
-            </div>
-        </div>
-        <div class="card-bottom-row">
-            <div class="product-price">$${parseFloat(product.price || 0).toFixed(2)}</div>
-            ${isOwner ?
-                `<button class="cart-add-btn" style="color: #ef4444;" onclick="deleteProduct('${productId}')" title="Delete"><i class="fa-solid fa-trash"></i></button>` :
-                `<button class="cart-add-btn" onclick="addToCart('${productId}')" title="Add to Cart"><i class="fa-solid fa-cart-shopping"></i></button>`
-            }
-        </div>
-    `;
-    return card;
-}
-
-function setupForms() {
-    const productForm = document.getElementById('productForm');
-    if (!productForm) return;
-
-    productForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-
-        const formData = new FormData();
-        const bizName = document.getElementById('formBusinessName')?.value || AppState.user?.businessName || 'Vendor';
-        const productName = document.getElementById('productName')?.value || '';
-        const price = document.getElementById('productPrice')?.value || '0';
-        const category = document.getElementById('productCategory')?.value || 'General';
-        const description = document.getElementById('productDescription')?.value || '';
-
-        formData.append('businessName', bizName);
-        formData.append('productName', productName);
-        formData.append('price', price);
-        formData.append('category', category);
-        formData.append('description', description);
-        
-        const fileInput = document.getElementById('productImage');
-        if (fileInput && fileInput.files[0]) {
-            formData.append('productImage', fileInput.files[0]);
-        }
-
-        try {
-            const res = await fetch(`${CONFIG.API_URL}/products`, {
-                method: 'POST',
-                body: formData
-            });
-
-            if (res.ok) {
-                productForm.reset();
-                fetchProducts();
-                showToast("Product published!", "success");
-            } else {
-                const errData = await res.json().catch(() => ({}));
-                showToast(errData.error || "Failed to publish product", "error");
-            }
-        } catch (err) {
-            console.error("Submission error:", err);
-            showToast("Server error connecting to backend", "error");
-        }
-    });
-}
-
-async function deleteProduct(id) {
-    if (!confirm("Delete this product?")) return;
-    await fetch(`${CONFIG.API_URL}/products/${id}`, { method: 'DELETE' });
-    fetchProducts();
-    showToast("Product deleted", "info");
-}
-
-function addToCart(id) {
-    const product = AppState.products.find(p => p.id === id);
-    if (!product) return;
-    const existing = AppState.cart.find(i => i.id === id);
-
-    if (existing) existing.qty += 1;
-    else {
-        AppState.cart.push({
-            id: product.id,
-            productName: product.productName,
-            price: product.price,
-            qty: 1
-        });
-    }
-    AppState.saveCart(AppState.cart);
-    updateCartUI();
-    toggleCartDrawer(true);
-    showToast(`Added ${product.productName} to cart`, "success");
-}
-
-function removeFromCart(id) {
-    AppState.cart = AppState.cart.filter(item => item.id !== id);
-    AppState.saveCart(AppState.cart);
-    updateCartUI();
-    showToast("Item removed", "info");
+function addToCart(product) {
+  cart.push(product);
+  updateCartUI();
 }
 
 function updateCartUI() {
-    const badge = document.getElementById("cartCountBadge");
-    const subtotalEl = document.getElementById("cartSubtotal");
-    const listEl = document.getElementById("cartItemsList");
+  const cartCount = document.getElementById('cartCount') || document.querySelector('.cart-count');
+  const cartItemsContainer = document.getElementById('cartItems') || document.querySelector('.cart-items');
+  const cartSubtotal = document.getElementById('cartSubtotal') || document.querySelector('.cart-subtotal');
 
-    const totalItems = AppState.cart.reduce((s, i) => s + i.qty, 0);
-    const subtotal = AppState.cart.reduce((s, i) => s + (i.price * i.qty), 0);
+  if (cartCount) cartCount.textContent = cart.length;
 
-    if (badge) badge.textContent = totalItems;
-    if (subtotalEl) subtotalEl.textContent = `$${subtotal.toFixed(2)}`;
-
-    if (listEl) {
-        if (AppState.cart.length === 0) {
-            listEl.innerHTML = '<p class="empty-cart-msg" style="color: var(--text-muted); padding: 12px 0;">Your cart is empty.</p>';
-        } else {
-            listEl.innerHTML = AppState.cart.map(item => `
-                <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border-color);">
-                    <div>
-                        <div style="font-weight: 600; font-size: 0.9rem;">${escapeHtml(item.productName)}</div>
-                        <div style="font-size: 0.8rem; color: var(--text-muted);">$${parseFloat(item.price).toFixed(2)} x ${item.qty}</div>
-                    </div>
-                    <button onclick="removeFromCart('${item.id}')" style="background: none; border: none; color: #ef4444; cursor: pointer;"><i class="fa-solid fa-xmark"></i></button>
-                </div>
-            `).join('');
-        }
+  if (cartItemsContainer) {
+    if (cart.length === 0) {
+      cartItemsContainer.innerHTML = '<p>Your cart is empty.</p>';
+    } else {
+      cartItemsContainer.innerHTML = cart.map((item, index) => `
+        <div class="cart-item" style="display:flex; justify-content:space-between; margin-bottom:8px;">
+          <span>${item.productName}</span>
+          <span>$${parseFloat(item.price).toFixed(2)}</span>
+          <button onclick="removeFromCart(${index})" style="background:none; border:none; color:red; cursor:pointer;">✕</button>
+        </div>
+      `).join('');
     }
+  }
+
+  if (cartSubtotal) {
+    const total = cart.reduce((sum, item) => sum + parseFloat(item.price || 0), 0);
+    cartSubtotal.textContent = `$${total.toFixed(2)}`;
+  }
 }
 
-function toggleCartDrawer(force = false) {
-    const drawer = document.getElementById("cartDrawer");
-    if (!drawer) return;
-    if (force) drawer.classList.add("open");
-    else drawer.classList.toggle("open");
+function removeFromCart(index) {
+  cart.splice(index, 1);
+  updateCartUI();
 }
 
-async function fetchDashboardMetrics() {
-    try {
-        const res = await fetch(`${CONFIG.API_URL}/dashboard`);
-        const data = await res.json();
-        const total = data.transactions.reduce((s, o) => s + o.amount, 0);
-        
-        const revEl = document.getElementById('totalRevenue');
-        const orderEl = document.getElementById('orderNum');
-        if (revEl) revEl.textContent = `$${total.toFixed(2)}`;
-        if (orderEl) orderEl.textContent = data.transactions.length;
+// --- PRODUCT PUBLISHING ---
+function initProductForm() {
+  const productForm = document.getElementById('productForm') || document.querySelector('form[action*="products"]');
 
-        const tbody = document.getElementById('transactionsTableBody');
-        if (tbody) {
-            tbody.innerHTML = data.transactions.length === 0 ?
-            `<tr><td colspan="4" style="text-align:center; padding:16px">No transactions yet</td></tr>` :
-            data.transactions.map(t => `
-                <tr style="border-bottom: 1px solid var(--border-color); font-size: 0.88rem;">
-                    <td style="padding: 10px;">${escapeHtml(t.customerName)}</td>
-                    <td style="padding: 10px; color: var(--text-muted);">${escapeHtml(t.email)}</td>
-                    <td style="padding: 10px; color: var(--text-muted);">${new Date(t.date).toLocaleDateString()}</td>
-                    <td style="padding: 10px; color: #10b981;">${escapeHtml(t.status)}</td>
-                </tr>
-            `).join('');
-        }
-    } catch (err) {
-        console.error("Failed to fetch dashboard metrics:", err);
-    }
-}
+  if (productForm) {
+    productForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const formData = new FormData(productForm);
 
-function setupSearch() {
-    const searchInput = document.getElementById('searchInput');
-    if (searchInput) {
-        searchInput.addEventListener('input', e => {
-            AppState.searchQuery = e.target.value.toLowerCase();
-            renderGrids();
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/products`, {
+          method: 'POST',
+          body: formData
         });
+
+        if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+
+        await response.json();
+        alert('Product published successfully!');
+        productForm.reset();
+        loadProducts();
+      } catch (error) {
+        console.error('Error publishing product:', error);
+        alert('Error connecting to backend. Ensure python api/index.py is running on port 5000.');
+      }
+    });
+  }
+}
+
+// --- LOAD PRODUCTS FROM BACKEND ---
+async function loadProducts() {
+  const container = document.getElementById('uploadedItems') || document.querySelector('.uploaded-items');
+  
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/products`);
+    if (!response.ok) throw new Error('Failed to fetch products');
+    
+    const products = await response.json();
+    
+    if (container) {
+      if (products.length === 0) {
+        container.innerHTML = "<p>You haven't uploaded any products yet.</p>";
+        return;
+      }
+
+      container.innerHTML = products.map(item => `
+        <div class="product-card" style="border: 1px solid #333; padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+          <img src="${item.mediaUrl}" alt="${item.productName}" style="max-width:100px; height:auto; border-radius:6px; display:block; margin-bottom:8px;">
+          <h4 style="margin: 4px 0;">${item.productName}</h4>
+          <p style="margin: 4px 0;"><strong>Price:</strong> $${item.price}</p>
+          <p style="margin: 4px 0;"><strong>Category:</strong> ${item.category}</p>
+          <button onclick='addToCart(${JSON.stringify(item)})' style="margin-top:8px; padding: 6px 12px; cursor:pointer;">Add to Cart</button>
+        </div>
+      `).join('');
     }
-}
-
-function updateUIProfile() {
-    if (AppState.user) {
-        const nameEl = document.getElementById("displayBusinessName");
-        const formBizEl = document.getElementById("formBusinessName");
-        if (nameEl) nameEl.textContent = AppState.user.businessName;
-        if (formBizEl) formBizEl.value = AppState.user.businessName;
-    }
-}
-
-function editShopName() {
-    const newName = prompt("Enter new shop name:", AppState.user?.businessName);
-    if (newName) {
-        AppState.user.businessName = newName;
-        AppState.saveUser(AppState.user);
-        updateUIProfile();
-        renderGrids();
-        showToast("Shop name updated", "success");
-    }
-}
-
-function showToast(msg, type="info") {
-    const t = document.createElement("div");
-    t.textContent = msg;
-    t.style.cssText = `position:fixed; bottom:80px; right:24px; background:${type==="error"?"#ef4444":type==="success"?"#22c55e":"#3b82f6"}; color:white; padding:12px 18px; border-radius:12px; z-index:9999`;
-    document.body.appendChild(t); 
-    setTimeout(() => t.remove(), 3000);
-}
-
-function escapeHtml(str) {
-    return String(str || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  } catch (error) {
+    console.error('Error loading products:', error);
+  }
 }
