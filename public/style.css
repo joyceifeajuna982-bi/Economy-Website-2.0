@@ -599,3 +599,12 @@ body {
     width: 100vw;
   }
 }
+.footer{
+  color: gray;
+  height: 10vh;
+  width: 100%;
+  margin-top: 100px;
+  align-content: center;
+  justify-content: center;
+  display: flex;
+}
