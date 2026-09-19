@@ -9,7 +9,8 @@ import cloudinary.uploader
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-DB_NAME = "bizspark.db"
+# Use Vercel's writable /tmp directory for SQLite storage
+DB_NAME = "/tmp/bizspark.db" if os.getenv('VERCEL') else "bizspark.db"
 
 # Cloudinary Configuration
 CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME', 'cuwkypxg')
@@ -56,6 +57,10 @@ def init_db():
         ''')
         db.commit()
 
+@app.before_request
+def ensure_db():
+    init_db()
+
 @app.route('/api/products', methods=['GET'])
 def get_products():
     with get_db() as db:
@@ -68,7 +73,6 @@ def add_product():
     data = request.form
     
     mediaUrl = DEFAULT_IMG
-    
     file = request.files.get('productImage') or request.files.get('image')
     if file and file.filename != '' and API_SECRET:
         try:
@@ -108,12 +112,6 @@ def get_dashboard():
     with get_db() as db:
         orders = db.execute('SELECT * FROM orders ORDER BY date DESC').fetchall()
     return jsonify({"transactions": [dict(row) for row in orders]})
-
-# Initialize DB on start
-try:
-    init_db()
-except Exception as e:
-    print("Database initialization note:", e)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
