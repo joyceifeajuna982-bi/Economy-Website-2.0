@@ -1,7 +1,6 @@
 const CONFIG = {
-    API_URL: window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
-        ? "http://127.0.0.1:5000/api"
-        : "/api",
+    // Updated to your new Vercel project domain
+    API_URL: "https://bizspark-lm.vercel.app/api",
     STORAGE_KEYS: {
         TOKEN: "bizspark_token",
         USER: "bizspark_user",
@@ -35,9 +34,10 @@ const AppState = {
 document.addEventListener("DOMContentLoaded", initApp);
 
 function initApp() {
-    const oldCart = localStorage.getItem('bizspark_cart');
+    // Clean up oversized local storage items if corrupted
+    const oldCart = localStorage.getItem(CONFIG.STORAGE_KEYS.CART);
     if (oldCart && oldCart.length > 100000) {
-        localStorage.removeItem('bizspark_cart');
+        localStorage.removeItem(CONFIG.STORAGE_KEYS.CART);
         AppState.cart = [];
     }
 
@@ -54,14 +54,14 @@ function initApp() {
     }
 }
 
-// --- AUTHENTICATION HELPERS & EVENT LISTENERS ---
+// --- AUTHENTICATION HELPERS & LISTENERS ---
 function setupAuthListeners() {
     const authForm = document.getElementById("authForm") || document.getElementById("loginForm");
     if (authForm) {
         authForm.addEventListener("submit", handleAuth);
     }
 
-    const logoutBtn = document.getElementById("logoutBtn");
+    const logoutBtn = document.getElementById("logoutBtn") || document.getElementById("authBtn");
     if (logoutBtn) {
         logoutBtn.addEventListener("click", handleLogout);
     }
@@ -79,6 +79,7 @@ function unlockSite() {
     const authModal = document.getElementById("authModal") || document.getElementById("loginModal");
     if (authModal) authModal.style.display = "none";
     if (appContent) appContent.style.display = "block";
+    
     updateUIProfile();
     fetchProducts();
     updateCartUI();
@@ -89,7 +90,7 @@ async function handleAuth(e) {
     const emailInput = document.getElementById("authEmail") || document.getElementById("email");
     const email = emailInput ? emailInput.value.trim() : "";
     
-    if (!email) return showToast("Enter email", "error");
+    if (!email) return showToast("Please enter an email address", "error");
 
     const bizName = email.split("@")[0] + "'s Shop";
     AppState.saveToken("token_" + Date.now());
@@ -103,7 +104,7 @@ function handleLogout() {
     AppState.saveUser(null);
     localStorage.removeItem(CONFIG.STORAGE_KEYS.TOKEN);
     localStorage.removeItem(CONFIG.STORAGE_KEYS.USER);
-    showToast("Signed out", "info");
+    showToast("Signed out successfully", "info");
     lockSite();
 }
 
@@ -127,15 +128,24 @@ function switchSection(id) {
     if (id === 'dashboardSection' || id === 'dashboard') fetchDashboardMetrics();
 }
 
-// --- PRODUCT DATA FETCHING & CARDS ---
+// --- PRODUCT DATA FETCHING & UI RENDERING ---
 async function fetchProducts() {
     try {
-        const res = await fetch(`${CONFIG.API_URL}/products`);
+        const res = await fetch(`${CONFIG.API_URL}/products`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+        });
+
+        if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            throw new Error(errBody.details || errBody.error || `Server status ${res.status}`);
+        }
+
         AppState.products = await res.json();
         renderGrids();
     } catch (err) {
-        console.error("Failed to load products:", err);
-        showToast("Failed to load products", "error");
+        console.error("Failed to fetch products:", err);
+        showToast(`Error fetching items: ${err.message}`, "error");
     }
 }
 
@@ -150,10 +160,11 @@ function renderGrids() {
     if (ownerGrid) ownerGrid.innerHTML = '';
     if (shopGrid) shopGrid.innerHTML = '';
 
+    const query = AppState.searchQuery.toLowerCase();
     const filtered = AppState.products.filter(p =>
-        (p.productName || '').toLowerCase().includes(AppState.searchQuery) ||
-        (p.businessName || '').toLowerCase().includes(AppState.searchQuery) ||
-        (p.category || '').toLowerCase().includes(AppState.searchQuery)
+        (p.productName || '').toLowerCase().includes(query) ||
+        (p.businessName || '').toLowerCase().includes(query) ||
+        (p.category || '').toLowerCase().includes(query)
     );
 
     if (emptyMarket) emptyMarket.style.display = filtered.length ? 'none' : 'block';
@@ -179,7 +190,7 @@ function createProductCard(product, isOwner) {
     card.innerHTML = `
         <div class="card-top-content">
             <div class="media-container">
-                <img src="${product.mediaUrl || CONFIG.DEFAULT_IMG}" class="product-media" alt="Product" style="width:100%; height:180px; object-fit:cover; border-radius:6px;">
+                <img src="${product.mediaUrl || CONFIG.DEFAULT_IMG}" class="product-media" alt="Product" style="width:100%; height:180px; object-fit:cover; border-radius:6px;" onerror="this.src='${CONFIG.DEFAULT_IMG}'">
                 <span class="category-tag">${escapeHtml(product.category || 'General')}</span>
             </div>
             <div class="product-details">
@@ -209,8 +220,14 @@ function setupForms() {
     productForm.addEventListener('submit', async (e) => {
         e.preventDefault();
 
+        const submitBtn = productForm.querySelector('button[type="submit"]');
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = "Publishing...";
+        }
+
         const formData = new FormData();
-        const bizName = document.getElementById('formBusinessName')?.value || AppState.user?.businessName || 'Vendor';
+        const bizName = document.getElementById('formBusinessName')?.value || AppState.user?.businessName || 'Merchant';
         const productName = document.getElementById('productName')?.value || '';
         const price = document.getElementById('productPrice')?.value || '0';
         const category = document.getElementById('productCategory')?.value || 'General';
@@ -221,7 +238,7 @@ function setupForms() {
         formData.append('price', price);
         formData.append('category', category);
         formData.append('description', description);
-        
+
         const fileInput = document.getElementById('productImage');
         if (fileInput && fileInput.files[0]) {
             formData.append('productImage', fileInput.files[0]);
@@ -233,26 +250,44 @@ function setupForms() {
                 body: formData
             });
 
+            const resData = await res.json().catch(() => ({}));
+
             if (res.ok) {
                 productForm.reset();
-                fetchProducts();
-                showToast("Product published!", "success");
+                updateUIProfile();
+                await fetchProducts();
+                showToast("Product published successfully!", "success");
             } else {
-                const errData = await res.json().catch(() => ({}));
-                showToast(errData.error || "Failed to publish product", "error");
+                showToast(resData.details || resData.error || "Failed to publish product", "error");
             }
         } catch (err) {
             console.error("Submission error:", err);
-            showToast("Server error connecting to backend", "error");
+            showToast("Network error: Could not reach Vercel backend", "error");
+        } finally {
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = "Publish Product";
+            }
         }
     });
 }
 
 async function deleteProduct(id) {
-    if (!confirm("Delete this product?")) return;
-    await fetch(`${CONFIG.API_URL}/products/${id}`, { method: 'DELETE' });
-    fetchProducts();
-    showToast("Product deleted", "info");
+    if (!confirm("Are you sure you want to delete this product?")) return;
+
+    try {
+        const res = await fetch(`${CONFIG.API_URL}/products/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+            await fetchProducts();
+            showToast("Product deleted successfully", "info");
+        } else {
+            const errData = await res.json().catch(() => ({}));
+            showToast(errData.error || "Failed to delete product", "error");
+        }
+    } catch (err) {
+        console.error("Delete error:", err);
+        showToast("Error connecting to server to delete product", "error");
+    }
 }
 
 // --- CART MANAGEMENT ---
@@ -273,8 +308,9 @@ function addToCart(id) {
     if (!product) return;
     const existing = AppState.cart.find(i => i.id === id);
 
-    if (existing) existing.qty += 1;
-    else {
+    if (existing) {
+        existing.qty += 1;
+    } else {
         AppState.cart.push({
             id: product.id,
             productName: product.productName,
@@ -292,7 +328,7 @@ function removeFromCart(id) {
     AppState.cart = AppState.cart.filter(item => item.id !== id);
     AppState.saveCart(AppState.cart);
     updateCartUI();
-    showToast("Item removed", "info");
+    showToast("Item removed from cart", "info");
 }
 
 function updateCartUI() {
@@ -301,7 +337,7 @@ function updateCartUI() {
     const listEl = document.getElementById("cartItemsList") || document.getElementById("cartItems");
 
     const totalItems = AppState.cart.reduce((s, i) => s + i.qty, 0);
-    const subtotal = AppState.cart.reduce((s, i) => s + (i.price * i.qty), 0);
+    const subtotal = AppState.cart.reduce((s, i) => s + (parseFloat(i.price) * i.qty), 0);
 
     if (badge) badge.textContent = totalItems;
     if (subtotalEl) subtotalEl.textContent = `$${subtotal.toFixed(2)}`;
@@ -340,12 +376,14 @@ function toggleCartDrawer(force) {
     }
 }
 
-// --- DASHBOARD & UTILS ---
+// --- DASHBOARD & METRICS ---
 async function fetchDashboardMetrics() {
     try {
         const res = await fetch(`${CONFIG.API_URL}/dashboard`);
+        if (!res.ok) return;
+
         const data = await res.json();
-        const total = (data.transactions || []).reduce((s, o) => s + o.amount, 0);
+        const total = (data.transactions || []).reduce((s, o) => s + parseFloat(o.amount || 0), 0);
         
         const revEl = document.getElementById('totalRevenue');
         const orderEl = document.getElementById('orderNum');
@@ -355,7 +393,7 @@ async function fetchDashboardMetrics() {
         const tbody = document.getElementById('transactionsTableBody');
         if (tbody) {
             tbody.innerHTML = (data.transactions || []).length === 0 ?
-            `<tr><td colspan="4" style="text-align:center; padding:16px">No transactions yet</td></tr>` :
+            `<tr><td colspan="4" style="text-align:center; padding:16px; color:#9ca3af;">No transactions yet</td></tr>` :
             data.transactions.map(t => `
                 <tr style="border-bottom: 1px solid #232733; font-size: 0.88rem;">
                     <td style="padding: 10px;">${escapeHtml(t.customerName)}</td>
@@ -374,7 +412,7 @@ function setupSearch() {
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
         searchInput.addEventListener('input', e => {
-            AppState.searchQuery = e.target.value.toLowerCase();
+            AppState.searchQuery = e.target.value;
             renderGrids();
         });
     }
@@ -391,21 +429,37 @@ function updateUIProfile() {
 
 function editShopName() {
     const newName = prompt("Enter new shop name:", AppState.user?.businessName);
-    if (newName) {
-        AppState.user.businessName = newName;
+    if (newName && newName.trim() !== '') {
+        AppState.user.businessName = newName.trim();
         AppState.saveUser(AppState.user);
         updateUIProfile();
         renderGrids();
-        showToast("Shop name updated", "success");
+        showToast("Shop name updated successfully", "success");
     }
 }
 
-function showToast(msg, type="info") {
+function showToast(msg, type = "info") {
     const t = document.createElement("div");
     t.textContent = msg;
-    t.style.cssText = `position:fixed; bottom:80px; right:24px; background:${type==="error"?"#ef4444":type==="success"?"#22c55e":"#3b82f6"}; color:white; padding:12px 18px; border-radius:12px; z-index:9999`;
+    t.style.cssText = `
+        position: fixed; 
+        bottom: 24px; 
+        right: 24px; 
+        background: ${type === "error" ? "#ef4444" : type === "success" ? "#22c55e" : "#3b82f6"}; 
+        color: white; 
+        padding: 12px 20px; 
+        border-radius: 8px; 
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 9999;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 14px;
+        transition: all 0.3s ease;
+    `;
     document.body.appendChild(t); 
-    setTimeout(() => t.remove(), 3000);
+    setTimeout(() => {
+        t.style.opacity = '0';
+        setTimeout(() => t.remove(), 300);
+    }, 3000);
 }
 
 function escapeHtml(str) {
