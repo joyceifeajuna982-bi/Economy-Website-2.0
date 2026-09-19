@@ -4,142 +4,97 @@ import time
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-# Initialize Flask app
 app = Flask(__name__)
-
-# Enable Flask-CORS across all routes
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# Use Vercel's writable /tmp directory for SQLite, or fallback to local file
 DB_NAME = "/tmp/bizspark.db" if os.getenv('VERCEL') else "bizspark.db"
 DEFAULT_IMG = "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400"
 
-# Setup Cloudinary if credentials exist in environment
-CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME', 'cuwkypxg')
-API_KEY = os.getenv('CLOUDINARY_API_KEY', '545112641637365')
-API_SECRET = os.getenv('CLOUDINARY_API_SECRET', 'hOq22SW3KzODDKL-AU_RuYcKEuE')
-
-has_cloudinary = False
-if API_SECRET:
-    try:
-        import cloudinary
-        import cloudinary.uploader
-        cloudinary.config(
-            cloud_name=CLOUD_NAME,
-            api_key=API_KEY,
-            api_secret=API_SECRET
-        )
-        has_cloudinary = True
-    except Exception as e:
-        print("Cloudinary init warning:", e)
-
-
 def get_db():
-    """Establish database connection with Row factory."""
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     return conn
 
-
 def init_db():
-    """Initialize database tables safely inside writable /tmp space and handle missing columns."""
     try:
         with get_db() as db:
             db.execute('''
                 CREATE TABLE IF NOT EXISTS products (
-                    id TEXT PRIMARY KEY, 
-                    businessName TEXT, 
-                    productName TEXT, 
-                    price REAL, 
-                    description TEXT, 
-                    category TEXT, 
-                    mediaUrl TEXT, 
-                    createdAt TEXT
+                    id TEXT PRIMARY KEY, businessName TEXT, productName TEXT, 
+                    price REAL, description TEXT, category TEXT, mediaUrl TEXT, createdAt TEXT
                 )
             ''')
             db.execute('''
                 CREATE TABLE IF NOT EXISTS orders (
-                    id TEXT PRIMARY KEY, 
-                    customerName TEXT, 
-                    email TEXT, 
-                    amount REAL, 
-                    status TEXT, 
-                    date TEXT
+                    id TEXT PRIMARY KEY, customerName TEXT, email TEXT, 
+                    amount REAL, status TEXT, date TEXT
                 )
             ''')
-
-            # Ensure all required columns exist in products (migration fallback)
             cursor = db.execute("PRAGMA table_info(products)")
             columns = [column[1] for column in cursor.fetchall()]
-            
             if 'category' not in columns:
                 db.execute('ALTER TABLE products ADD COLUMN category TEXT')
             if 'mediaUrl' not in columns:
                 db.execute('ALTER TABLE products ADD COLUMN mediaUrl TEXT')
             if 'createdAt' not in columns:
                 db.execute('ALTER TABLE products ADD COLUMN createdAt TEXT')
-
             db.commit()
     except Exception as e:
         print("Database initialization error:", e)
 
-
-# Run DB initialization on startup
 init_db()
-
 
 @app.after_request
 def add_cors_headers(response):
-    """Inject required CORS headers into every response to prevent browser blocks."""
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, DELETE, OPTIONS'
     return response
 
-
 @app.route('/api/products', methods=['GET', 'OPTIONS'])
 def get_products():
-    """Fetch all products ordered by creation date."""
     if request.method == 'OPTIONS':
         return '', 200
-
     try:
         init_db()
         with get_db() as db:
             rows = db.execute('SELECT * FROM products ORDER BY createdAt DESC').fetchall()
         return jsonify([dict(row) for row in rows]), 200
     except Exception as e:
-        print("Error fetching products:", e)
         return jsonify({"error": "Failed to fetch products", "details": str(e)}), 500
-
 
 @app.route('/api/products', methods=['POST', 'OPTIONS'])
 def add_product():
-    """Add a new product with optional image upload."""
     if request.method == 'OPTIONS':
         return '', 200
 
     try:
         init_db()
         p_id = "prod_" + str(int(time.time() * 1000))
-        
-        # Support both multipart form-data and standard JSON body
         data = request.form if request.form else (request.get_json(silent=True) or {})
 
-        product_name = data.get('productName', '').strip()
+        # Accept productName, name, or title as fallback
+        product_name = (data.get('productName') or data.get('name') or data.get('title') or '').strip()
         if not product_name:
             return jsonify({"error": "Product name is required"}), 400
 
-        # Handle image upload
         media_url = DEFAULT_IMG
         file = request.files.get('productImage') or request.files.get('image')
 
-        if file and file.filename != '' and has_cloudinary:
+        # Safely attempt Cloudinary upload
+        if file and file.filename != '':
             try:
+                import cloudinary
+                import cloudinary.uploader
+                cloudinary.config(
+                    cloud_name=os.getenv('CLOUDINARY_CLOUD_NAME', 'cuwkypxg'),
+                    api_key=os.getenv('CLOUDINARY_API_KEY', '545112641637365'),
+                    api_secret=os.getenv('CLOUDINARY_API_SECRET', 'hOq22SW3KzODDKL-AU_RuYcKEuE')
+                )
                 upload_result = cloudinary.uploader.upload(file)
                 media_url = upload_result.get('secure_url', DEFAULT_IMG)
             except Exception as upload_err:
-                print("Cloudinary upload error:", upload_err)
+                print("Cloudinary upload failed, falling back to default image:", upload_err)
 
         category = data.get('category') or data.get('productCategory') or 'General'
         try:
@@ -168,13 +123,10 @@ def add_product():
         print("Error adding product:", e)
         return jsonify({"error": "Failed to publish product", "details": str(e)}), 500
 
-
 @app.route('/api/products/<p_id>', methods=['DELETE', 'OPTIONS'])
 def delete_product(p_id):
-    """Delete a product by ID."""
     if request.method == 'OPTIONS':
         return '', 200
-
     try:
         init_db()
         with get_db() as db:
@@ -182,25 +134,19 @@ def delete_product(p_id):
             db.commit()
         return jsonify({"message": "Product deleted successfully"}), 200
     except Exception as e:
-        print("Error deleting product:", e)
         return jsonify({"error": "Failed to delete product", "details": str(e)}), 500
-
 
 @app.route('/api/dashboard', methods=['GET', 'OPTIONS'])
 def get_dashboard():
-    """Retrieve transaction/order records."""
     if request.method == 'OPTIONS':
         return '', 200
-
     try:
         init_db()
         with get_db() as db:
             orders = db.execute('SELECT * FROM orders ORDER BY date DESC').fetchall()
         return jsonify({"transactions": [dict(row) for row in orders]}), 200
     except Exception as e:
-        print("Error fetching dashboard:", e)
         return jsonify({"error": "Failed to load dashboard data", "details": str(e)}), 500
-
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
