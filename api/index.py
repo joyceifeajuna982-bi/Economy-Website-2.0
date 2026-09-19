@@ -42,7 +42,7 @@ def get_db():
 
 
 def init_db():
-    """Initialize database tables safely inside writable /tmp space."""
+    """Initialize database tables safely inside writable /tmp space and handle missing columns."""
     try:
         with get_db() as db:
             db.execute('''
@@ -67,15 +67,25 @@ def init_db():
                     date TEXT
                 )
             ''')
+
+            # Ensure all required columns exist in products (migration fallback)
+            cursor = db.execute("PRAGMA table_info(products)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            if 'category' not in columns:
+                db.execute('ALTER TABLE products ADD COLUMN category TEXT')
+            if 'mediaUrl' not in columns:
+                db.execute('ALTER TABLE products ADD COLUMN mediaUrl TEXT')
+            if 'createdAt' not in columns:
+                db.execute('ALTER TABLE products ADD COLUMN createdAt TEXT')
+
             db.commit()
     except Exception as e:
         print("Database initialization error:", e)
 
 
-@app.before_request
-def before_request_check():
-    """Ensure database tables exist before handling incoming requests."""
-    init_db()
+# Run DB initialization on startup
+init_db()
 
 
 @app.after_request
@@ -94,6 +104,7 @@ def get_products():
         return '', 200
 
     try:
+        init_db()
         with get_db() as db:
             rows = db.execute('SELECT * FROM products ORDER BY createdAt DESC').fetchall()
         return jsonify([dict(row) for row in rows]), 200
@@ -109,8 +120,11 @@ def add_product():
         return '', 200
 
     try:
+        init_db()
         p_id = "prod_" + str(int(time.time() * 1000))
-        data = request.form
+        
+        # Support both multipart form-data and standard JSON body
+        data = request.form if request.form else (request.get_json(silent=True) or {})
 
         product_name = data.get('productName', '').strip()
         if not product_name:
@@ -128,7 +142,11 @@ def add_product():
                 print("Cloudinary upload error:", upload_err)
 
         category = data.get('category') or data.get('productCategory') or 'General'
-        price = float(data.get('price', 0.0))
+        try:
+            price = float(data.get('price', 0.0))
+        except (ValueError, TypeError):
+            price = 0.0
+
         biz_name = data.get('businessName', 'Merchant')
         desc = data.get('description', '')
         created_at = time.strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -158,6 +176,7 @@ def delete_product(p_id):
         return '', 200
 
     try:
+        init_db()
         with get_db() as db:
             db.execute('DELETE FROM products WHERE id = ?', (p_id,))
             db.commit()
@@ -174,6 +193,7 @@ def get_dashboard():
         return '', 200
 
     try:
+        init_db()
         with get_db() as db:
             orders = db.execute('SELECT * FROM orders ORDER BY date DESC').fetchall()
         return jsonify({"transactions": [dict(row) for row in orders]}), 200
@@ -185,4 +205,3 @@ def get_dashboard():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
-    
