@@ -1,11 +1,17 @@
 import os
+import re
 import sqlite3
 import time
 import uuid
+from typing import Any
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
+
+# ============================================================
+# APP
+# ============================================================
 
 app = Flask(__name__)
 
@@ -19,23 +25,47 @@ CORS(
 )
 
 
+# ============================================================
+# CONFIG
+# ============================================================
+
 DEFAULT_IMG = (
     "https://images.unsplash.com/"
-    "photo-1523275335684-37898b6baf30?w=800"
+    "photo-1523275335684-37898b6baf30"
+    "?w=800"
 )
+
+MAX_PRODUCT_NAME_LENGTH = 200
+MAX_BUSINESS_NAME_LENGTH = 200
+MAX_CATEGORY_LENGTH = 100
+MAX_DESCRIPTION_LENGTH = 1000
+MAX_CUSTOMER_NAME_LENGTH = 200
+MAX_EMAIL_LENGTH = 320
+
+# Vercel's serverless filesystem is temporary.
+# /tmp is writable on Vercel.
+if os.getenv("VERCEL"):
+    DB_NAME = "/tmp/bizspark.db"
+else:
+    DB_NAME = os.path.join(
+        os.path.dirname(
+            os.path.abspath(__file__)
+        ),
+        "..",
+        "bizspark.db"
+    )
 
 
 # ============================================================
 # DATABASE
 # ============================================================
 
-if os.getenv("VERCEL"):
-    DB_NAME = "/tmp/bizspark.db"
-else:
-    DB_NAME = "bizspark.db"
-
-
 def get_db():
+    """
+    Open a SQLite connection.
+
+    Row factory lets us access columns by name.
+    """
     connection = sqlite3.connect(
         DB_NAME,
         timeout=20
@@ -47,6 +77,9 @@ def get_db():
 
 
 def init_db():
+    """
+    Create database tables if they don't already exist.
+    """
 
     with get_db() as db:
 
@@ -81,11 +114,249 @@ def init_db():
         db.commit()
 
 
+# Initialize when the module loads.
 init_db()
 
 
 # ============================================================
-# CORS
+# HELPERS
+# ============================================================
+
+def utc_now():
+    """
+    Return current UTC time in ISO-like format.
+    """
+    return time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ",
+        time.gmtime()
+    )
+
+
+def clean_string(
+    value: Any,
+    default: str = ""
+) -> str:
+    """
+    Safely convert a value to a trimmed string.
+    """
+    if value is None:
+        return default
+
+    return str(value).strip()
+
+
+def is_valid_email(email: str) -> bool:
+    """
+    Basic email validation.
+
+    This is intentionally not an exhaustive RFC validator.
+    """
+    if not email:
+        return False
+
+    if len(email) > MAX_EMAIL_LENGTH:
+        return False
+
+    pattern = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+
+    return bool(
+        re.match(
+            pattern,
+            email
+        )
+    )
+
+
+def json_error(
+    message: str,
+    status: int = 400,
+    details: str | None = None
+):
+    """
+    Standard API error response.
+    """
+
+    response = {
+        "error": message
+    }
+
+    if details:
+        response["details"] = details
+
+    return jsonify(response), status
+
+
+def get_cloudinary_config():
+    """
+    Read Cloudinary credentials from environment variables.
+    """
+
+    cloud_name = os.getenv(
+        "CLOUDINARY_CLOUD_NAME"
+    )
+
+    api_key = os.getenv(
+        "CLOUDINARY_API_KEY"
+    )
+
+    api_secret = os.getenv(
+        "CLOUDINARY_API_SECRET"
+    )
+
+    available = all([
+        cloud_name,
+        api_key,
+        api_secret
+    ])
+
+    return {
+        "available": available,
+        "cloud_name": cloud_name,
+        "api_key": api_key,
+        "api_secret": api_secret
+    }
+
+
+def upload_image_to_cloudinary(uploaded_file):
+    """
+    Upload an image to Cloudinary.
+
+    Returns the secure URL.
+
+    If Cloudinary isn't configured, returns the default image.
+    """
+
+    if not uploaded_file:
+        return DEFAULT_IMG
+
+    if not uploaded_file.filename:
+        return DEFAULT_IMG
+
+    config = get_cloudinary_config()
+
+    if not config["available"]:
+        print(
+            "Cloudinary is not configured. "
+            "Using default image."
+        )
+
+        return DEFAULT_IMG
+
+    try:
+
+        import cloudinary
+        import cloudinary.uploader
+
+        cloudinary.config(
+            cloud_name=config["cloud_name"],
+            api_key=config["api_key"],
+            api_secret=config["api_secret"],
+            secure=True
+        )
+
+        result = cloudinary.uploader.upload(
+            uploaded_file,
+            folder="bizspark/products",
+            resource_type="image"
+        )
+
+        secure_url = result.get(
+            "secure_url"
+        )
+
+        if secure_url:
+            return secure_url
+
+        return DEFAULT_IMG
+
+    except Exception as error:
+
+        print(
+            "CLOUDINARY UPLOAD ERROR:",
+            repr(error)
+        )
+
+        # Do not prevent the product from being created
+        # simply because image hosting failed.
+        return DEFAULT_IMG
+
+
+def calculate_order_total(items):
+    """
+    Calculate an order total using prices stored in SQLite.
+
+    IMPORTANT:
+    We never trust the price supplied by the browser.
+    """
+
+    if not isinstance(items, list):
+        return 0.0
+
+    total = 0.0
+
+    with get_db() as db:
+
+        for item in items:
+
+            if not isinstance(item, dict):
+                continue
+
+            product_id = clean_string(
+                item.get("id")
+            )
+
+            try:
+                quantity = int(
+                    item.get(
+                        "qty",
+                        0
+                    )
+                )
+            except (
+                ValueError,
+                TypeError
+            ):
+                continue
+
+            if not product_id:
+                continue
+
+            if quantity <= 0:
+                continue
+
+            # Prevent absurd quantities.
+            if quantity > 100:
+                quantity = 100
+
+            product = db.execute(
+                """
+                SELECT price
+                FROM products
+                WHERE id = ?
+                """,
+                (product_id,)
+            ).fetchone()
+
+            if not product:
+                continue
+
+            actual_price = float(
+                product["price"]
+            )
+
+            total += (
+                actual_price *
+                quantity
+            )
+
+    return round(
+        total,
+        2
+    )
+
+
+# ============================================================
+# CORS / OPTIONS
 # ============================================================
 
 @app.after_request
@@ -98,21 +369,25 @@ def add_cors_headers(response):
     response.headers[
         "Access-Control-Allow-Headers"
     ] = (
-        "Content-Type, Authorization, "
+        "Content-Type, "
+        "Authorization, "
         "X-Requested-With"
     )
 
     response.headers[
         "Access-Control-Allow-Methods"
     ] = (
-        "GET, POST, DELETE, OPTIONS"
+        "GET, "
+        "POST, "
+        "DELETE, "
+        "OPTIONS"
     )
 
     return response
 
 
 # ============================================================
-# HOME / HEALTH
+# HOME
 # ============================================================
 
 @app.route(
@@ -123,9 +398,14 @@ def api_home():
 
     return jsonify({
         "ok": True,
-        "service": "BizSpark API"
+        "service": "BizSpark API",
+        "version": "1.0.0"
     })
 
+
+# ============================================================
+# HEALTH
+# ============================================================
 
 @app.route(
     "/api/health",
@@ -144,10 +424,16 @@ def health():
 
     except Exception as error:
 
-        return jsonify({
-            "ok": False,
-            "error": str(error)
-        }), 500
+        print(
+            "HEALTH ERROR:",
+            repr(error)
+        )
+
+        return json_error(
+            "Database health check failed",
+            500,
+            str(error)
+        )
 
 
 # ============================================================
@@ -185,9 +471,12 @@ def get_products():
                 """
             ).fetchall()
 
-        return jsonify(
-            [dict(row) for row in rows]
-        ), 200
+        products = [
+            dict(row)
+            for row in rows
+        ]
+
+        return jsonify(products), 200
 
     except Exception as error:
 
@@ -196,14 +485,15 @@ def get_products():
             repr(error)
         )
 
-        return jsonify({
-            "error": "Failed to fetch products",
-            "details": str(error)
-        }), 500
+        return json_error(
+            "Failed to fetch products",
+            500,
+            str(error)
+        )
 
 
 # ============================================================
-# PRODUCTS - POST
+# PRODUCTS - CREATE
 # ============================================================
 
 @app.route(
@@ -228,40 +518,42 @@ def add_product():
             request.content_type
         )
 
-        print(
-            "Form:",
-            dict(request.form)
+        # ----------------------------------------------------
+        # FORM DATA
+        # ----------------------------------------------------
+
+        product_name = clean_string(
+            request.form.get(
+                "productName"
+            )
         )
 
-        print(
-            "Files:",
-            list(request.files.keys())
+        business_name = clean_string(
+            request.form.get(
+                "businessName"
+            ),
+            "Merchant"
         )
 
-        product_name = (
-            request.form.get("productName")
-            or ""
-        ).strip()
+        category = clean_string(
+            request.form.get(
+                "category"
+            ),
+            "General"
+        )
 
-        business_name = (
-            request.form.get("businessName")
-            or "Merchant"
-        ).strip()
+        description = clean_string(
+            request.form.get(
+                "description"
+            )
+        )
 
-        category = (
-            request.form.get("category")
-            or "General"
-        ).strip()
-
-        description = (
-            request.form.get("description")
-            or ""
-        ).strip()
-
-        price_raw = (
-            request.form.get("price")
-            or "0"
-        ).strip()
+        price_raw = clean_string(
+            request.form.get(
+                "price"
+            ),
+            "0"
+        )
 
         # ----------------------------------------------------
         # VALIDATION
@@ -269,24 +561,46 @@ def add_product():
 
         if not product_name:
 
-            return jsonify({
-                "error":
-                    "Product name is required"
-            }), 400
+            return json_error(
+                "Product name is required",
+                400
+            )
 
-        if len(product_name) > 200:
+        if len(product_name) > MAX_PRODUCT_NAME_LENGTH:
 
-            return jsonify({
-                "error":
-                    "Product name is too long"
-            }), 400
+            return json_error(
+                "Product name is too long",
+                400
+            )
 
-        if len(business_name) > 200:
+        if not business_name:
 
-            return jsonify({
-                "error":
-                    "Business name is too long"
-            }), 400
+            business_name = "Merchant"
+
+        if len(business_name) > MAX_BUSINESS_NAME_LENGTH:
+
+            return json_error(
+                "Business name is too long",
+                400
+            )
+
+        if len(category) > MAX_CATEGORY_LENGTH:
+
+            return json_error(
+                "Category is too long",
+                400
+            )
+
+        if len(description) > MAX_DESCRIPTION_LENGTH:
+
+            return json_error(
+                "Description is too long",
+                400
+            )
+
+        # ----------------------------------------------------
+        # PRICE
+        # ----------------------------------------------------
 
         try:
 
@@ -299,23 +613,34 @@ def add_product():
             TypeError
         ):
 
-            return jsonify({
-                "error":
-                    "Invalid product price"
-            }), 400
+            return json_error(
+                "Invalid product price",
+                400
+            )
 
         if price < 0:
 
-            return jsonify({
-                "error":
-                    "Price cannot be negative"
-            }), 400
+            return json_error(
+                "Price cannot be negative",
+                400
+            )
+
+        if price != price:
+
+            return json_error(
+                "Invalid product price",
+                400
+            )
+
+        # Keep prices at two decimal places.
+        price = round(
+            price,
+            2
+        )
 
         # ----------------------------------------------------
         # IMAGE
         # ----------------------------------------------------
-
-        media_url = DEFAULT_IMG
 
         uploaded_file = (
             request.files.get(
@@ -325,6 +650,8 @@ def add_product():
                 "image"
             )
         )
+
+        media_url = DEFAULT_IMG
 
         if uploaded_file:
 
@@ -338,87 +665,14 @@ def add_product():
                 uploaded_file.content_type
             )
 
-        # ----------------------------------------------------
-        # CLOUDINARY
-        # ----------------------------------------------------
-
-        cloud_name = os.getenv(
-            "CLOUDINARY_CLOUD_NAME"
-        )
-
-        cloud_api_key = os.getenv(
-            "CLOUDINARY_API_KEY"
-        )
-
-        cloud_api_secret = os.getenv(
-            "CLOUDINARY_API_SECRET"
-        )
-
-        cloudinary_available = all([
-            cloud_name,
-            cloud_api_key,
-            cloud_api_secret
-        ])
-
-        if (
-            uploaded_file
-            and uploaded_file.filename
-            and cloudinary_available
-        ):
-
-            try:
-
-                import cloudinary
-                import cloudinary.uploader
-
-                cloudinary.config(
-                    cloud_name=cloud_name,
-                    api_key=cloud_api_key,
-                    api_secret=cloud_api_secret,
-                    secure=True
+            media_url = (
+                upload_image_to_cloudinary(
+                    uploaded_file
                 )
-
-                upload_result = (
-                    cloudinary.uploader.upload(
-                        uploaded_file,
-                        folder="bizspark/products",
-                        resource_type="image"
-                    )
-                )
-
-                media_url = (
-                    upload_result.get(
-                        "secure_url"
-                    )
-                    or DEFAULT_IMG
-                )
-
-                print(
-                    "Cloudinary upload successful"
-                )
-
-            except Exception as upload_error:
-
-                print(
-                    "CLOUDINARY ERROR:",
-                    repr(upload_error)
-                )
-
-                # Product publication should still work.
-                media_url = DEFAULT_IMG
-
-        elif uploaded_file:
-
-            print(
-                "Cloudinary is not configured."
-            )
-
-            print(
-                "Using default product image."
             )
 
         # ----------------------------------------------------
-        # SAVE PRODUCT
+        # CREATE PRODUCT
         # ----------------------------------------------------
 
         product_id = (
@@ -426,12 +680,7 @@ def add_product():
             uuid.uuid4().hex
         )
 
-        created_at = (
-            time.strftime(
-                "%Y-%m-%dT%H:%M:%SZ",
-                time.gmtime()
-            )
-        )
+        created_at = utc_now()
 
         with get_db() as db:
 
@@ -483,12 +732,11 @@ def add_product():
             repr(error)
         )
 
-        return jsonify({
-            "error":
-                "Failed to publish product",
-            "details":
-                str(error)
-        }), 500
+        return json_error(
+            "Failed to publish product",
+            500,
+            str(error)
+        )
 
 
 # ============================================================
@@ -508,6 +756,17 @@ def delete_product(p_id):
 
         init_db()
 
+        p_id = clean_string(
+            p_id
+        )
+
+        if not p_id:
+
+            return json_error(
+                "Product ID is required",
+                400
+            )
+
         with get_db() as db:
 
             cursor = db.execute(
@@ -518,17 +777,21 @@ def delete_product(p_id):
                 (p_id,)
             )
 
-            db.commit()
+            deleted = cursor.rowcount
 
-            deleted =
-                cursor.rowcount
+            db.commit()
 
         if deleted == 0:
 
-            return jsonify({
-                "error":
-                    "Product not found"
-            }), 404
+            return json_error(
+                "Product not found",
+                404
+            )
+
+        print(
+            "PRODUCT DELETED:",
+            p_id
+        )
 
         return jsonify({
             "success": True,
@@ -543,16 +806,15 @@ def delete_product(p_id):
             repr(error)
         )
 
-        return jsonify({
-            "error":
-                "Failed to delete product",
-            "details":
-                str(error)
-        }), 500
+        return json_error(
+            "Failed to delete product",
+            500,
+            str(error)
+        )
 
 
 # ============================================================
-# ORDERS
+# ORDERS - CREATE
 # ============================================================
 
 @app.route(
@@ -568,124 +830,108 @@ def create_order():
 
         init_db()
 
-        data =
-            request.get_json(
-                silent=True
-            ) or {}
+        data = request.get_json(
+            silent=True
+        ) or {}
 
-        customer_name = (
+        if not isinstance(data, dict):
+
+            return json_error(
+                "Invalid order data",
+                400
+            )
+
+        customer_name = clean_string(
             data.get(
                 "customerName"
-            ) or ""
-        ).strip()
+            )
+        )
 
-        email = (
+        email = clean_string(
             data.get(
                 "email"
-            ) or ""
-        ).strip()
+            )
+        ).lower()
 
-        items =
-            data.get("items") or []
+        items = data.get(
+            "items"
+        ) or []
+
+        # ----------------------------------------------------
+        # VALIDATE CUSTOMER
+        # ----------------------------------------------------
 
         if not customer_name:
 
-            return jsonify({
-                "error":
-                    "Customer name is required"
-            }), 400
+            return json_error(
+                "Customer name is required",
+                400
+            )
+
+        if len(customer_name) > MAX_CUSTOMER_NAME_LENGTH:
+
+            return json_error(
+                "Customer name is too long",
+                400
+            )
 
         if not email:
 
-            return jsonify({
-                "error":
-                    "Customer email is required"
-            }), 400
+            return json_error(
+                "Customer email is required",
+                400
+            )
 
-        if (
-            not isinstance(items, list)
-            or not items
-        ):
+        if not is_valid_email(email):
 
-            return jsonify({
-                "error":
-                    "Order contains no items"
-            }), 400
+            return json_error(
+                "Please provide a valid email address",
+                400
+            )
 
-        amount = 0.0
+        # ----------------------------------------------------
+        # VALIDATE ITEMS
+        # ----------------------------------------------------
 
-        for item in items:
+        if not isinstance(items, list):
 
-            try:
+            return json_error(
+                "Invalid order items",
+                400
+            )
 
-                product_id =
-                    str(
-                        item.get("id")
-                    )
+        if not items:
 
-                quantity =
-                    int(
-                        item.get(
-                            "qty",
-                            0
-                        )
-                    )
+            return json_error(
+                "Order contains no items",
+                400
+            )
 
-                if quantity <= 0:
-                    continue
+        # ----------------------------------------------------
+        # CALCULATE REAL TOTAL
+        # ----------------------------------------------------
 
-                # IMPORTANT:
-                # Get the actual product price
-                # from the database.
-                with get_db() as db:
-
-                    product =
-                        db.execute(
-                            """
-                            SELECT price
-                            FROM products
-                            WHERE id = ?
-                            """,
-                            (product_id,)
-                        ).fetchone()
-
-                if not product:
-                    continue
-
-                actual_price =
-                    float(
-                        product["price"]
-                    )
-
-                amount += (
-                    actual_price *
-                    quantity
-                )
-
-            except (
-                ValueError,
-                TypeError
-            ):
-                continue
+        amount = calculate_order_total(
+            items
+        )
 
         if amount <= 0:
 
-            return jsonify({
-                "error":
-                    "Invalid order total"
-            }), 400
+            return json_error(
+                "Invalid order total",
+                400
+            )
+
+        # ----------------------------------------------------
+        # CREATE ORDER
+        # ----------------------------------------------------
 
         order_id = (
             "order_" +
             uuid.uuid4().hex
         )
 
-        date = (
-            time.strftime(
-                "%Y-%m-%dT%H:%M:%SZ",
-                time.gmtime()
-            )
-        )
+        date = utc_now()
 
         with get_db() as db:
 
@@ -713,6 +959,13 @@ def create_order():
 
             db.commit()
 
+        print(
+            "ORDER CREATED:",
+            order_id,
+            "AMOUNT:",
+            amount
+        )
+
         return jsonify({
             "success": True,
             "orderId": order_id,
@@ -728,17 +981,16 @@ def create_order():
             repr(error)
         )
 
-        return jsonify({
-            "error":
-                "Failed to create order",
-            "details":
-                str(error)
-        }), 500
+        return json_error(
+            "Failed to create order",
+            500,
+            str(error)
+        )
 
 
 # ============================================================
 # DASHBOARD
-============================================================
+# ============================================================
 
 @app.route(
     "/api/dashboard",
@@ -757,15 +1009,25 @@ def get_dashboard():
 
             orders = db.execute(
                 """
-                SELECT *
+                SELECT
+                    id,
+                    customerName,
+                    email,
+                    amount,
+                    status,
+                    date
                 FROM orders
                 ORDER BY date DESC
                 """
             ).fetchall()
 
+        transactions = [
+            dict(row)
+            for row in orders
+        ]
+
         return jsonify({
-            "transactions":
-                [dict(row) for row in orders]
+            "transactions": transactions
         }), 200
 
     except Exception as error:
@@ -775,12 +1037,11 @@ def get_dashboard():
             repr(error)
         )
 
-        return jsonify({
-            "error":
-                "Failed to load dashboard data",
-            "details":
-                str(error)
-        }), 500
+        return json_error(
+            "Failed to load dashboard data",
+            500,
+            str(error)
+        )
 
 
 # ============================================================
@@ -794,6 +1055,30 @@ if __name__ == "__main__":
             "PORT",
             5000
         )
+    )
+
+    print(
+        "======================================"
+    )
+
+    print(
+        "      BizSpark API Starting..."
+    )
+
+    print(
+        "======================================"
+    )
+
+    print(
+        f"Database: {DB_NAME}"
+    )
+
+    print(
+        f"Port: {port}"
+    )
+
+    print(
+        "======================================"
     )
 
     app.run(
