@@ -7,10 +7,7 @@ const CONFIG = {
         CART: "bizspark_cart"
     },
 
-    DEFAULT_IMG: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800",
-    MAX_IMAGE_SIZE_MB: 4,
-    MAX_IMAGE_WIDTH: 1600,
-    IMAGE_QUALITY: 0.82
+    DEFAULT_IMG: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800"
 };
 
 const AppState = {
@@ -34,7 +31,6 @@ const AppState = {
     })(),
 
     products: [],
-    orders: [],
     searchQuery: "",
 
     saveUser(user) {
@@ -109,7 +105,7 @@ async function apiFetch(endpoint, options = {}) {
         data = await response.json().catch(() => ({}));
     } else {
         const text = await response.text().catch(() => "");
-        data = { error: text || "The server returned an invalid response." };
+        data = { error: text || "Invalid response from server." };
     }
 
     if (!response.ok) {
@@ -312,7 +308,24 @@ function createProductCard(product, isOwner) {
     return card;
 }
 
-/* PRODUCT PUBLISHING */
+/* FILE SELECTION LISTENER */
+function setupFileInput() {
+    const fileInput = document.getElementById("productImage");
+    const fileNameText = document.getElementById("fileNameText");
+
+    if (!fileInput) return;
+
+    fileInput.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (file && fileNameText) {
+            fileNameText.textContent = file.name;
+        } else if (fileNameText) {
+            fileNameText.textContent = "Choose Image File";
+        }
+    });
+}
+
+/* PRODUCT FORM PUBLISHING */
 function setupForms() {
     document.getElementById("productForm")?.addEventListener("submit", publishProduct);
 }
@@ -327,18 +340,18 @@ async function publishProduct(e) {
     const priceValue = document.getElementById("productPrice")?.value;
     const category = document.getElementById("productCategory")?.value.trim();
     const description = document.getElementById("productDescription")?.value.trim();
-    const businessName = AppState.user?.businessName || document.getElementById("formBusinessName")?.value.trim() || "Merchant";
+    const businessName = AppState.user?.businessName || "Merchant";
 
-    if (!productName || !priceValue || !fileInput?.files?.length) {
-        showPublishError("Please fill out all required fields.");
+    if (!productName || !priceValue) {
+        showToast("Please enter a product name and price.", "error");
         return;
     }
 
     try {
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Publishing...`;
-
-        const compressedFile = await compressImage(fileInput.files[0]);
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = "Publishing...";
+        }
 
         const formData = new FormData();
         formData.append("businessName", businessName);
@@ -346,78 +359,31 @@ async function publishProduct(e) {
         formData.append("price", Number(priceValue).toFixed(2));
         formData.append("category", category || "General");
         formData.append("description", description || "");
-        formData.append("productImage", compressedFile, "product.jpg");
 
-        const result = await apiFetch("/products", { method: "POST", body: formData });
+        if (fileInput && fileInput.files.length > 0) {
+            formData.append("productImage", fileInput.files[0]);
+        }
+
+        const result = await apiFetch("/products", {
+            method: "POST",
+            body: formData
+        });
 
         form.reset();
-        document.getElementById("fileNameText").textContent = "Choose Image File";
-        updateUIProfile();
+        const fileNameText = document.getElementById("fileNameText");
+        if (fileNameText) fileNameText.textContent = "Choose Image File";
+
+        showToast("Product published successfully!", "success");
         await fetchProducts();
 
-        showToast(result.message || "Product published successfully!", "success");
-        switchSection("marketSection");
-
     } catch (error) {
-        showPublishError(error.message || "Could not publish product.");
+        showToast(`Upload failed: ${error.message}`, "error");
     } finally {
         if (submitBtn) {
             submitBtn.disabled = false;
-            submitBtn.innerHTML = `<i class="fa-solid fa-cloud-arrow-up"></i> Publish Product`;
+            submitBtn.textContent = "Publish Product";
         }
     }
-}
-
-function showPublishError(message) {
-    const errorBox = document.getElementById("publishError");
-    if (errorBox) {
-        errorBox.textContent = message;
-        errorBox.style.display = "block";
-    }
-    showToast(message, "error");
-}
-
-/* IMAGE PROCESSING */
-function loadImage(file) {
-    return new Promise((resolve, reject) => {
-        const url = URL.createObjectURL(file);
-        const img = new Image();
-        img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
-        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Unable to read image file.")); };
-        img.src = url;
-    });
-}
-
-async function compressImage(file) {
-    const image = await loadImage(file);
-    let width = image.naturalWidth || image.width;
-    let height = image.naturalHeight || image.height;
-
-    if (width > CONFIG.MAX_IMAGE_WIDTH) {
-        const scale = CONFIG.MAX_IMAGE_WIDTH / width;
-        width = Math.round(width * scale);
-        height = Math.round(height * scale);
-    }
-
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-
-    const ctx = canvas.getContext("2d", { alpha: false });
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, width, height);
-    ctx.drawImage(image, 0, 0, width, height);
-
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", CONFIG.IMAGE_QUALITY));
-    return new File([blob], "product.jpg", { type: "image/jpeg", lastModified: Date.now() });
-}
-
-function setupFileInput() {
-    const input = document.getElementById("productImage");
-    input?.addEventListener("change", () => {
-        const text = document.getElementById("fileNameText");
-        if (text) text.textContent = input.files?.[0]?.name || "Choose Image File";
-    });
 }
 
 /* DELETE PRODUCT */
@@ -476,19 +442,19 @@ function updateCartUI() {
     if (!listEl) return;
 
     if (!AppState.cart.length) {
-        listEl.innerHTML = `<div class="empty-cart-msg">Your cart is empty.</div>`;
+        listEl.innerHTML = `<div class="empty-cart-msg" style="padding: 20px; text-align: center; color: #64748b;">Your cart is empty.</div>`;
         return;
     }
 
     listEl.innerHTML = AppState.cart.map(item => `
-        <div class="cart-item">
+        <div class="cart-item" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #e2e8f0;">
             <div class="cart-item-info">
-                <strong>${escapeHtml(item.productName)}</strong>
-                <span>$${Number(item.price).toFixed(2)}</span>
+                <strong>${escapeHtml(item.productName)}</strong><br>
+                <span style="font-size: 0.85rem; color: #64748b;">$${Number(item.price).toFixed(2)} x ${item.qty}</span>
             </div>
-            <div class="cart-item-right">
+            <div class="cart-item-right" style="display: flex; align-items: center; gap: 12px;">
                 <strong>$${(item.price * item.qty).toFixed(2)}</strong>
-                <button type="button" class="remove-cart-btn" onclick="removeFromCart('${escapeAttribute(item.id)}')">
+                <button type="button" class="remove-cart-btn" onclick="removeFromCart('${escapeAttribute(item.id)}')" style="background: transparent; color: #ef4444; padding: 4px; border: none; cursor: pointer;">
                     <i class="fa-solid fa-trash"></i>
                 </button>
             </div>
@@ -552,21 +518,24 @@ async function submitCartOrder(e) {
     }
 }
 
-/* DASHBOARD */
+/* DASHBOARD METRICS */
 async function fetchDashboardMetrics() {
     try {
         const data = await apiFetch("/dashboard");
         const transactions = Array.isArray(data.transactions) ? data.transactions : [];
 
         const total = transactions.reduce((sum, order) => sum + Number(order.amount || 0), 0);
-        document.getElementById("totalRevenue").textContent = `$${total.toFixed(2)}`;
-        document.getElementById("orderNum").textContent = transactions.length;
+        const totalRevEl = document.getElementById("totalRevenue");
+        const orderNumEl = document.getElementById("orderNum");
+
+        if (totalRevEl) totalRevEl.textContent = `$${total.toFixed(2)}`;
+        if (orderNumEl) orderNumEl.textContent = transactions.length;
 
         const tbody = document.getElementById("transactionsTableBody");
         if (!tbody) return;
 
         if (!transactions.length) {
-            tbody.innerHTML = `<tr><td colspan="4" class="table-empty">No transactions yet.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="4" class="table-empty" style="text-align: center; padding: 20px; color: #64748b;">No transactions yet.</td></tr>`;
             return;
         }
 
@@ -618,10 +587,15 @@ function setupSearch() {
 function updateUIProfile() {
     if (!AppState.user) return;
     const name = AppState.user.businessName || "Shop";
-    document.getElementById("displayBusinessName").textContent = name;
-    document.getElementById("displayBusinessEmail").textContent = AppState.user.email || "";
-    document.getElementById("formBusinessName").value = name;
-    document.getElementById("businessLogo").textContent = name.charAt(0).toUpperCase();
+    const bizNameEl = document.getElementById("displayBusinessName");
+    const bizEmailEl = document.getElementById("displayBusinessEmail");
+    const formBizNameEl = document.getElementById("formBusinessName");
+    const bizLogoEl = document.getElementById("businessLogo");
+
+    if (bizNameEl) bizNameEl.textContent = name;
+    if (bizEmailEl) bizEmailEl.textContent = AppState.user.email || "";
+    if (formBizNameEl) formBizNameEl.value = name;
+    if (bizLogoEl) bizLogoEl.textContent = name.charAt(0).toUpperCase();
 }
 
 function showToast(message, type = "info") {
