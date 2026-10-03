@@ -1,4 +1,3 @@
-
 "use strict";
 
 /* =========================================================
@@ -215,11 +214,6 @@ async function apiFetch(
             `Bearer ${AppState.token}`
         );
     }
-
-    /*
-     * Do not manually set Content-Type for FormData.
-     * The browser must set its own multipart boundary.
-     */
 
     if (
         options.body &&
@@ -542,12 +536,6 @@ function handleAuthSubmit(event) {
         return;
     }
 
-    /*
-     * Current backend does not provide a real
-     * authentication endpoint, so this creates
-     * a local account session.
-     */
-
     AppState.saveToken(
         `local_${Date.now()}`
     );
@@ -836,6 +824,22 @@ function closeMobileMenu() {
 
 
 /* =========================================================
+   IMAGE HELPER
+========================================================= */
+
+function getValidImageSrc(src) {
+    if (!src || typeof src !== 'string' || src.trim() === '') {
+        return CONFIG.DEFAULT_IMG;
+    }
+    const trimmed = src.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
+        return trimmed;
+    }
+    return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+}
+
+
+/* =========================================================
    MARKETPLACE
 ========================================================= */
 
@@ -1046,9 +1050,7 @@ function renderProducts() {
         card.className =
             "product-card";
 
-        const image =
-            product.mediaUrl ||
-            CONFIG.DEFAULT_IMG;
+        const image = getValidImageSrc(product.mediaUrl);
 
         const price =
             Number(product.price) || 0;
@@ -1059,6 +1061,7 @@ function renderProducts() {
                     class="product-media"
                     src="${escapeHTML(image)}"
                     alt="${escapeHTML(product.productName || "Product")}"
+                    onerror="this.onerror=null; this.src='${CONFIG.DEFAULT_IMG}';"
                     loading="lazy"
                 >
             </div>
@@ -1141,6 +1144,16 @@ function setupProductForm() {
 }
 
 
+function readFileAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+        reader.readAsDataURL(file);
+    });
+}
+
+
 async function publishProduct(event) {
 
     event.preventDefault();
@@ -1178,6 +1191,11 @@ async function publishProduct(event) {
     const imageInput =
         document.getElementById(
             "productImage"
+        );
+
+    const previewImg =
+        document.getElementById(
+            "productPreviewImage"
         );
 
     const button =
@@ -1229,13 +1247,15 @@ async function publishProduct(event) {
         return;
     }
 
+    let mediaUrl = CONFIG.DEFAULT_IMG;
+
     if (
         imageInput &&
-        imageInput.files.length
+        imageInput.files &&
+        imageInput.files.length > 0
     ) {
 
-        const file =
-            imageInput.files[0];
+        const file = imageInput.files[0];
 
         const maxSize =
             5 * 1024 * 1024;
@@ -1249,6 +1269,15 @@ async function publishProduct(event) {
 
             return;
         }
+
+        try {
+            mediaUrl = await readFileAsDataURL(file);
+        } catch (e) {
+            console.error("Error reading file:", e);
+        }
+
+    } else if (previewImg && previewImg.src && !previewImg.src.endsWith('#')) {
+        mediaUrl = previewImg.src;
     }
 
     const formData =
@@ -1280,12 +1309,14 @@ async function publishProduct(event) {
         "Business"
     );
 
-    /*
-     * The current Python backend does not
-     * actually store uploaded image files.
-     * We therefore only send the product
-     * information that the backend supports.
-     */
+    formData.append(
+        "mediaUrl",
+        mediaUrl
+    );
+
+    if (imageInput && imageInput.files.length) {
+        formData.append("file", imageInput.files[0]);
+    }
 
     if (button) {
 
@@ -1591,8 +1622,7 @@ function addToCart(productId) {
             price:
                 Number(product.price) || 0,
             mediaUrl:
-                product.mediaUrl ||
-                CONFIG.DEFAULT_IMG,
+                getValidImageSrc(product.mediaUrl),
             qty: 1
         });
     }
@@ -1734,17 +1764,17 @@ function renderCart() {
                 const price =
                     Number(item.price) || 0;
 
+                const image = getValidImageSrc(item.mediaUrl);
+
                 return `
                     <div class="cart-item">
 
                         <img
-                            src="${escapeHTML(
-                                item.mediaUrl ||
-                                CONFIG.DEFAULT_IMG
-                            )}"
+                            src="${escapeHTML(image)}"
                             alt="${escapeHTML(
                                 item.productName
                             )}"
+                            onerror="this.onerror=null; this.src='${CONFIG.DEFAULT_IMG}';"
                         >
 
                         <div class="cart-item-info">
@@ -2386,11 +2416,6 @@ function updateUIProfile() {
 ========================================================= */
 
 function setupDashboard() {
-
-    /*
-     * Dashboard navigation is already
-     * handled by setupNavigation().
-     */
 }
 
 
