@@ -1280,11 +1280,19 @@ async function publishProduct(event) {
     );
 
     /*
-     * The current Python backend does not
-     * actually store uploaded image files.
-     * We therefore only send the product
-     * information that the backend supports.
+     * Append the selected image file to FormData so the
+     * browser uploads it as part of the request payload.
      */
+    if (
+        imageInput &&
+        imageInput.files.length > 0
+    ) {
+
+        formData.append(
+            "productImage",
+            imageInput.files[0]
+        );
+    }
 
     if (button) {
 
