@@ -1,4 +1,6 @@
-// Sample products data with distinct web image URLs
+// ==========================================
+// 1. DYNAMIC PRODUCTS DATA & CONFIG
+// ==========================================
 let products = [
     {
         id: 1,
@@ -7,55 +9,103 @@ let products = [
         seller: "obinna's Shop",
         description: "kfkfnvninriw ofiowiwronviowroinerijireoio ern oireuio hero iheriohierohio eruoer",
         price: 222,
-        // Any direct image URL will display here
-        image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&q=80" 
+        image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&q=80"
     },
     {
         id: 2,
         name: "shoe",
-        category: "Electronics",
+        category: "Fashion",
         seller: "joyceifeajuna982's Shop",
         description: "nbfbhidhchdci idh cchdc donvoi nvnvfnvfviofnvifnvnefvor vir vrwvjrijijefje ejevjrejvrej9r",
         price: 22,
-        // Completely different image URL for the second item
-        image: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&q=80" 
+        image: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&q=80"
     }
 ];
 
 let cart = [];
-
-// DOM Elements
-const productGrid = document.getElementById('product-grid');
-const searchInput = document.getElementById('search-input');
-const categoryFilter = document.getElementById('category-filter');
-const cartCount = document.getElementById('cart-count');
-const cartItemsContainer = document.getElementById('cart-items');
-const cartTotal = document.getElementById('cart-total');
-
-// Neutral placeholder ONLY used if the image link is broken or completely empty
 const PLACEHOLDER_IMAGE = "https://via.placeholder.com/300x200?text=No+Image+Available";
 
-// Helper to determine the image source dynamically for ANY product
-function getDynamicImage(imageInput) {
+// Helper: Evaluates ANY image input (URL, Base64 upload, or local path)
+function getValidImageSrc(imageInput) {
     if (!imageInput || typeof imageInput !== 'string' || imageInput.trim() === '') {
         return PLACEHOLDER_IMAGE;
     }
-
     const trimmed = imageInput.trim();
 
-    // 1. Direct Web URLs, Base64 uploads, or Blob preview URLs
+    // Supports external links, user uploaded Base64 strings, or blob previews
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
         return trimmed;
     }
-
-    // 2. Relative paths
     return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
 }
 
-// Function to render products
+
+// ==========================================
+// 2. SIGN IN & AUTHENTICATION HANDLER
+// ==========================================
+function initAuth() {
+    const loginForm = document.querySelector('form') || document.getElementById('login-form');
+    const emailInput = document.querySelector('input[type="email"]') || document.getElementById('email');
+    const passwordInput = document.querySelector('input[type="password"]') || document.getElementById('password');
+
+    if (loginForm) {
+        loginForm.addEventListener('submit', function (e) {
+            e.preventDefault(); // Prevents page reload / unwanted query parameters in URL
+
+            const email = emailInput ? emailInput.value.trim() : '';
+            const password = passwordInput ? passwordInput.value.trim() : '';
+
+            if (!email || !password) {
+                alert('Please enter both an email address and a password.');
+                return;
+            }
+
+            // Simulate user session in localStorage
+            const user = { email: email, isLoggedIn: true };
+            localStorage.setItem('bizspark_user', JSON.stringify(user));
+
+            alert(`Welcome back, ${email}! You are now signed in.`);
+
+            // Redirect to marketplace or main dashboard if on a separate login page
+            if (window.location.pathname.includes('login') || window.location.search.includes('email=')) {
+                window.location.href = '/'; 
+            } else {
+                updateAuthUI();
+            }
+        });
+    }
+
+    updateAuthUI();
+}
+
+function updateAuthUI() {
+    const storedUser = localStorage.getItem('bizspark_user');
+    const authStatusElement = document.getElementById('auth-status');
+
+    if (storedUser && authStatusElement) {
+        const user = JSON.parse(storedUser);
+        authStatusElement.innerHTML = `Signed in as <strong>${user.email}</strong> (<a href="#" id="sign-out-btn">Sign out</a>)`;
+        
+        const signOutBtn = document.getElementById('sign-out-btn');
+        if (signOutBtn) {
+            signOutBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                localStorage.removeItem('bizspark_user');
+                alert('You have been signed out.');
+                window.location.reload();
+            });
+        }
+    }
+}
+
+
+// ==========================================
+// 3. MARKETPLACE & PRODUCT RENDERING
+// ==========================================
 function renderProducts(items) {
+    const productGrid = document.getElementById('product-grid');
     if (!productGrid) return;
-    
+
     productGrid.innerHTML = '';
 
     if (!items || items.length === 0) {
@@ -67,13 +117,13 @@ function renderProducts(items) {
         const productCard = document.createElement('div');
         productCard.classList.add('product-card');
 
-        // Extract the exact unique image for THIS specific product
-        const finalImageSrc = getDynamicImage(product.image);
+        // Dynamically loads whatever image is assigned to the product
+        const imageSrc = getValidImageSrc(product.image);
 
         productCard.innerHTML = `
             <div class="product-image-container">
                 <img 
-                    src="${finalImageSrc}" 
+                    src="${imageSrc}" 
                     alt="${product.name || 'Product Image'}" 
                     class="product-image"
                     onerror="this.onerror=null; this.src='${PLACEHOLDER_IMAGE}';"
@@ -95,23 +145,80 @@ function renderProducts(items) {
     });
 }
 
-// Search and Category Filtering
-function filterProducts() {
-    const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
-    const selectedCategory = categoryFilter ? categoryFilter.value : 'All categories';
 
-    const filtered = products.filter(product => {
-        const matchesSearch = product.name.toLowerCase().includes(searchTerm) || 
-                              product.description.toLowerCase().includes(searchTerm);
-        const matchesCategory = selectedCategory === 'All categories' || product.category === selectedCategory;
+// ==========================================
+// 4. SELL FORM HANDLER (ANY IMAGE UPLOAD/LINK)
+// ==========================================
+function initSellForm() {
+    const sellForm = document.getElementById('sell-form');
+    if (!sellForm) return;
 
-        return matchesSearch && matchesCategory;
+    sellForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        const name = document.getElementById('product-name')?.value || 'New Product';
+        const price = document.getElementById('product-price')?.value || 0;
+        const category = document.getElementById('product-category')?.value || 'General';
+        const seller = document.getElementById('product-seller')?.value || 'My Shop';
+        const description = document.getElementById('product-desc')?.value || '';
+
+        const fileInput = document.getElementById('product-image-file');
+        const urlInput = document.getElementById('product-image-url')?.value.trim();
+
+        // 1. Local file upload using FileReader
+        if (fileInput && fileInput.files && fileInput.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function (event) {
+                addNewProduct({ name, price, category, seller, description, image: event.target.result });
+            };
+            reader.readAsDataURL(fileInput.files[0]);
+        } 
+        // 2. Direct Web URL
+        else if (urlInput && urlInput !== '') {
+            addNewProduct({ name, price, category, seller, description, image: urlInput });
+        } 
+        // 3. Fallback Placeholder
+        else {
+            addNewProduct({ name, price, category, seller, description, image: PLACEHOLDER_IMAGE });
+        }
+
+        sellForm.reset();
     });
-
-    renderProducts(filtered);
 }
 
-// Shopping Cart Functions
+function addNewProduct(productData) {
+    const newProduct = { id: Date.now(), ...productData };
+    products.unshift(newProduct);
+    renderProducts(products);
+}
+
+
+// ==========================================
+// 5. SEARCH & SHOPPING CART FUNCTIONS
+// ==========================================
+function initFilters() {
+    const searchInput = document.getElementById('search-input');
+    const categoryFilter = document.getElementById('category-filter');
+
+    function filterProducts() {
+        const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
+        const selectedCategory = categoryFilter ? categoryFilter.value : 'All categories';
+
+        const filtered = products.filter(product => {
+            const matchesSearch = product.name.toLowerCase().includes(searchTerm) || 
+                                  product.description.toLowerCase().includes(searchTerm);
+            const matchesCategory = selectedCategory === 'All categories' || product.category === selectedCategory;
+
+            return matchesSearch && matchesCategory;
+        });
+
+        renderProducts(filtered);
+    }
+
+    if (searchInput) searchInput.addEventListener('input', filterProducts);
+    if (categoryFilter) categoryFilter.addEventListener('change', filterProducts);
+}
+
 function addToCart(productId) {
     const product = products.find(p => p.id === productId);
     if (!product) return;
@@ -127,6 +234,10 @@ function addToCart(productId) {
 }
 
 function updateCartUI() {
+    const cartCount = document.getElementById('cart-count');
+    const cartItemsContainer = document.getElementById('cart-items');
+    const cartTotal = document.getElementById('cart-total');
+
     if (cartCount) {
         const totalCount = cart.reduce((sum, item) => sum + item.quantity, 0);
         cartCount.textContent = totalCount;
@@ -135,12 +246,7 @@ function updateCartUI() {
     if (!cartItemsContainer || !cartTotal) return;
 
     if (cart.length === 0) {
-        cartItemsContainer.innerHTML = `
-            <div class="empty-cart">
-                <p>Your cart is empty</p>
-                <small>Add products from the marketplace.</small>
-            </div>
-        `;
+        cartItemsContainer.innerHTML = '<div class="empty-cart"><p>Your cart is empty</p></div>';
         cartTotal.textContent = '₦0.00';
         return;
     }
@@ -170,10 +276,13 @@ function removeFromCart(productId) {
     updateCartUI();
 }
 
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', () => {
-    renderProducts(products);
 
-    if (searchInput) searchInput.addEventListener('input', filterProducts);
-    if (categoryFilter) categoryFilter.addEventListener('change', filterProducts);
+// ==========================================
+// 6. INITIALIZATION ON PAGE LOAD
+// ==========================================
+document.addEventListener('DOMContentLoaded', () => {
+    initAuth();
+    renderProducts(products);
+    initSellForm();
+    initFilters();
 });
