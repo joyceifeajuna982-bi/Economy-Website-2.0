@@ -1,5 +1,5 @@
 // ==========================================
-// 1. DYNAMIC PRODUCTS DATA & CONFIG
+// 1. PRODUCTS DATA
 // ==========================================
 let products = [
     {
@@ -25,86 +25,24 @@ let products = [
 let cart = [];
 const PLACEHOLDER_IMAGE = "https://via.placeholder.com/300x200?text=No+Image+Available";
 
-// Helper: Evaluates ANY image input (URL, Base64 upload, or local path)
+// Safe image path builder
 function getValidImageSrc(imageInput) {
     if (!imageInput || typeof imageInput !== 'string' || imageInput.trim() === '') {
         return PLACEHOLDER_IMAGE;
     }
     const trimmed = imageInput.trim();
-
-    // Supports external links, user uploaded Base64 strings, or blob previews
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
         return trimmed;
     }
     return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
 }
 
-
 // ==========================================
-// 2. SIGN IN & AUTHENTICATION HANDLER
-// ==========================================
-function initAuth() {
-    const loginForm = document.querySelector('form') || document.getElementById('login-form');
-    const emailInput = document.querySelector('input[type="email"]') || document.getElementById('email');
-    const passwordInput = document.querySelector('input[type="password"]') || document.getElementById('password');
-
-    if (loginForm) {
-        loginForm.addEventListener('submit', function (e) {
-            e.preventDefault(); // Prevents page reload / unwanted query parameters in URL
-
-            const email = emailInput ? emailInput.value.trim() : '';
-            const password = passwordInput ? passwordInput.value.trim() : '';
-
-            if (!email || !password) {
-                alert('Please enter both an email address and a password.');
-                return;
-            }
-
-            // Simulate user session in localStorage
-            const user = { email: email, isLoggedIn: true };
-            localStorage.setItem('bizspark_user', JSON.stringify(user));
-
-            alert(`Welcome back, ${email}! You are now signed in.`);
-
-            // Redirect to marketplace or main dashboard if on a separate login page
-            if (window.location.pathname.includes('login') || window.location.search.includes('email=')) {
-                window.location.href = '/'; 
-            } else {
-                updateAuthUI();
-            }
-        });
-    }
-
-    updateAuthUI();
-}
-
-function updateAuthUI() {
-    const storedUser = localStorage.getItem('bizspark_user');
-    const authStatusElement = document.getElementById('auth-status');
-
-    if (storedUser && authStatusElement) {
-        const user = JSON.parse(storedUser);
-        authStatusElement.innerHTML = `Signed in as <strong>${user.email}</strong> (<a href="#" id="sign-out-btn">Sign out</a>)`;
-        
-        const signOutBtn = document.getElementById('sign-out-btn');
-        if (signOutBtn) {
-            signOutBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                localStorage.removeItem('bizspark_user');
-                alert('You have been signed out.');
-                window.location.reload();
-            });
-        }
-    }
-}
-
-
-// ==========================================
-// 3. MARKETPLACE & PRODUCT RENDERING
+// 2. PRODUCT RENDERING (HOME PAGE)
 // ==========================================
 function renderProducts(items) {
     const productGrid = document.getElementById('product-grid');
-    if (!productGrid) return;
+    if (!productGrid) return; // Safely exit if not on home page
 
     productGrid.innerHTML = '';
 
@@ -117,7 +55,6 @@ function renderProducts(items) {
         const productCard = document.createElement('div');
         productCard.classList.add('product-card');
 
-        // Dynamically loads whatever image is assigned to the product
         const imageSrc = getValidImageSrc(product.image);
 
         productCard.innerHTML = `
@@ -145,9 +82,36 @@ function renderProducts(items) {
     });
 }
 
+// ==========================================
+// 3. AUTHENTICATION & LOGIN FORM
+// ==========================================
+function initAuth() {
+    const loginForm = document.getElementById('login-form') || document.querySelector('form');
+    if (!loginForm) return;
+
+    loginForm.addEventListener('submit', function (e) {
+        const emailInput = document.getElementById('email') || loginForm.querySelector('input[type="email"]');
+        const passwordInput = document.getElementById('password') || loginForm.querySelector('input[type="password"]');
+
+        if (!emailInput || !passwordInput) return; // Proceed with normal submission if not a sign-in form
+
+        e.preventDefault();
+        const email = emailInput.value.trim();
+        const password = passwordInput.value.trim();
+
+        if (!email || !password) {
+            alert('Please enter both email and password.');
+            return;
+        }
+
+        localStorage.setItem('bizspark_user', JSON.stringify({ email: email, isLoggedIn: true }));
+        alert(`Welcome back, ${email}!`);
+        window.location.href = '/';
+    });
+}
 
 // ==========================================
-// 4. SELL FORM HANDLER (ANY IMAGE UPLOAD/LINK)
+// 4. SELL FORM HANDLER
 // ==========================================
 function initSellForm() {
     const sellForm = document.getElementById('sell-form');
@@ -156,7 +120,7 @@ function initSellForm() {
     sellForm.addEventListener('submit', function (e) {
         e.preventDefault();
 
-        const name = document.getElementById('product-name')?.value || 'New Product';
+        const name = document.getElementById('product-name')?.value || 'New Item';
         const price = document.getElementById('product-price')?.value || 0;
         const category = document.getElementById('product-category')?.value || 'General';
         const seller = document.getElementById('product-seller')?.value || 'My Shop';
@@ -165,20 +129,15 @@ function initSellForm() {
         const fileInput = document.getElementById('product-image-file');
         const urlInput = document.getElementById('product-image-url')?.value.trim();
 
-        // 1. Local file upload using FileReader
         if (fileInput && fileInput.files && fileInput.files[0]) {
             const reader = new FileReader();
             reader.onload = function (event) {
                 addNewProduct({ name, price, category, seller, description, image: event.target.result });
             };
             reader.readAsDataURL(fileInput.files[0]);
-        } 
-        // 2. Direct Web URL
-        else if (urlInput && urlInput !== '') {
+        } else if (urlInput && urlInput !== '') {
             addNewProduct({ name, price, category, seller, description, image: urlInput });
-        } 
-        // 3. Fallback Placeholder
-        else {
+        } else {
             addNewProduct({ name, price, category, seller, description, image: PLACEHOLDER_IMAGE });
         }
 
@@ -192,9 +151,8 @@ function addNewProduct(productData) {
     renderProducts(products);
 }
 
-
 // ==========================================
-// 5. SEARCH & SHOPPING CART FUNCTIONS
+// 5. SEARCH, FILTER & CART
 // ==========================================
 function initFilters() {
     const searchInput = document.getElementById('search-input');
@@ -276,13 +234,16 @@ function removeFromCart(productId) {
     updateCartUI();
 }
 
-
 // ==========================================
-// 6. INITIALIZATION ON PAGE LOAD
+// 6. INITIALIZATION
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
-    initAuth();
-    renderProducts(products);
-    initSellForm();
-    initFilters();
+    try {
+        renderProducts(products);
+        initAuth();
+        initSellForm();
+        initFilters();
+    } catch (e) {
+        console.error("Initialization error:", e);
+    }
 });
