@@ -2773,7 +2773,7 @@ function renderBusinessProducts() {
                                     product.id
                                 )}"
                             >
-                                🗑️ Delete
+                                🗑️
                             </button>
 
                         </div>
