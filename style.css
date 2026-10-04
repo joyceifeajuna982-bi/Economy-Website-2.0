@@ -2097,6 +2097,56 @@ a:focus-visible {
     color: var(--text);
 }
 
+.business-product {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.business-product-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.business-product-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.delete-product-btn {
+    border: none;
+    background: #ef4444;
+    color: white;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: 0.2s ease;
+}
+
+.delete-product-btn:hover {
+    background: #dc2626;
+    transform: translateY(-1px);
+}
+
+.delete-product-btn:active {
+    transform: scale(0.97);
+}
+
+@media (max-width: 600px) {
+    .business-product {
+        align-items: flex-start;
+    }
+
+    .business-product-actions {
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 8px;
+    }
+}
 
 /* =========================================================
    RESPONSIVE — TABLET
