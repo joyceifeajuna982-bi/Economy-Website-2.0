@@ -1,17 +1,28 @@
 import os
 import uuid
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
 import cloudinary
 import cloudinary.uploader
 
+
 app = Flask(__name__)
 
-CORS(app, resources={
-    r"/api/*": {
-        "origins": "*"
+# =========================================================
+# CORS
+# =========================================================
+
+CORS(
+    app,
+    resources={
+        r"/api/*": {
+            "origins": "*"
+        }
     }
-})
+)
+
 
 # =========================================================
 # CONFIG
@@ -39,6 +50,7 @@ ALLOWED_MIME_TYPES = {
     "image/webp"
 }
 
+
 # =========================================================
 # CLOUDINARY
 # =========================================================
@@ -50,12 +62,14 @@ if CLOUDINARY_URL:
         cloudinary_url=CLOUDINARY_URL
     )
 
+
 # =========================================================
 # DATABASE
 # =========================================================
 
 products_db = []
 orders_db = []
+
 
 # =========================================================
 # HELPERS
@@ -81,15 +95,10 @@ def allowed_file(filename):
 
 
 def upload_image_to_cloudinary(image):
-    """
-    Uploads the selected image directly to Cloudinary
-    and returns the permanent HTTPS URL.
-    """
-
     if not CLOUDINARY_URL:
         raise RuntimeError(
-            "Cloudinary is not configured on the server. "
-            "Please add CLOUDINARY_URL to Vercel Environment Variables."
+            "Cloudinary is not configured. "
+            "Add CLOUDINARY_URL to your Vercel Environment Variables."
         )
 
     result = cloudinary.uploader.upload(
@@ -105,7 +114,7 @@ def upload_image_to_cloudinary(image):
 
     if not secure_url:
         raise RuntimeError(
-            "Cloudinary uploaded the image but did not return a secure URL."
+            "Cloudinary did not return an image URL."
         )
 
     return secure_url
@@ -125,7 +134,7 @@ def health():
 
 
 # =========================================================
-# PRODUCTS - GET
+# GET PRODUCTS
 # =========================================================
 
 @app.route("/api/products", methods=["GET"])
@@ -134,18 +143,13 @@ def get_products():
 
 
 # =========================================================
-# PRODUCTS - POST
+# CREATE PRODUCT
 # =========================================================
 
 @app.route("/api/products", methods=["POST"])
 def add_product():
 
     try:
-
-        # -------------------------------------------------
-        # READ FORM DATA
-        # -------------------------------------------------
-
         product_name = clean_text(
             request.form.get("productName")
         )
@@ -171,14 +175,12 @@ def add_product():
         # -------------------------------------------------
 
         if not product_name:
-
             return jsonify({
                 "success": False,
                 "error": "Product name is required."
             }), 400
 
         if not price_text:
-
             return jsonify({
                 "success": False,
                 "error": "Product price is required."
@@ -186,16 +188,13 @@ def add_product():
 
         try:
             price = float(price_text)
-
         except (TypeError, ValueError):
-
             return jsonify({
                 "success": False,
                 "error": "Product price must be a valid number."
             }), 400
 
         if price < 0:
-
             return jsonify({
                 "success": False,
                 "error": "Product price cannot be negative."
@@ -211,9 +210,7 @@ def add_product():
 
         if image and image.filename:
 
-            # Check filename
             if not allowed_file(image.filename):
-
                 return jsonify({
                     "success": False,
                     "error": (
@@ -222,36 +219,27 @@ def add_product():
                     )
                 }), 400
 
-            # Check MIME type
             if image.mimetype not in ALLOWED_MIME_TYPES:
-
                 return jsonify({
                     "success": False,
                     "error": "Invalid image type."
                 }), 400
 
-            # Make sure the file isn't empty
             image.seek(0, os.SEEK_END)
             file_size = image.tell()
             image.seek(0)
 
             if file_size <= 0:
-
                 return jsonify({
                     "success": False,
                     "error": "The selected image is empty."
                 }), 400
 
             if file_size > 5 * 1024 * 1024:
-
                 return jsonify({
                     "success": False,
                     "error": "Image must be smaller than 5MB."
                 }), 400
-
-            # -------------------------------------------------
-            # CLOUDINARY UPLOAD
-            # -------------------------------------------------
 
             media_url = upload_image_to_cloudinary(image)
 
@@ -272,10 +260,6 @@ def add_product():
 
         products_db.append(new_product)
 
-        # -------------------------------------------------
-        # RESPONSE
-        # -------------------------------------------------
-
         return jsonify({
             "success": True,
             "message": "Product published successfully.",
@@ -293,6 +277,47 @@ def add_product():
 
 
 # =========================================================
+# DELETE PRODUCT
+# =========================================================
+
+@app.route("/api/products/<product_id>", methods=["DELETE"])
+def delete_product(product_id):
+
+    try:
+        product = next(
+            (
+                item
+                for item in products_db
+                if str(item.get("id")) == str(product_id)
+            ),
+            None
+        )
+
+        if product is None:
+            return jsonify({
+                "success": False,
+                "error": "Product not found."
+            }), 404
+
+        products_db.remove(product)
+
+        return jsonify({
+            "success": True,
+            "message": "Product deleted successfully.",
+            "product": product
+        }), 200
+
+    except Exception as error:
+
+        print("DELETE PRODUCT ERROR:", repr(error))
+
+        return jsonify({
+            "success": False,
+            "error": str(error)
+        }), 500
+
+
+# =========================================================
 # ORDERS
 # =========================================================
 
@@ -300,7 +325,6 @@ def add_product():
 def create_order():
 
     try:
-
         data = request.get_json(silent=True) or {}
 
         customer_name = clean_text(
@@ -314,17 +338,21 @@ def create_order():
         items = data.get("items", [])
 
         if not customer_name or not email:
-
             return jsonify({
                 "success": False,
                 "error": "Customer name and email are required."
             }), 400
 
         if not isinstance(items, list):
-
             return jsonify({
                 "success": False,
                 "error": "Invalid order items."
+            }), 400
+
+        if not items:
+            return jsonify({
+                "success": False,
+                "error": "Your order is empty."
             }), 400
 
         total_amount = 0
@@ -332,7 +360,6 @@ def create_order():
         for item in items:
 
             try:
-
                 item_price = float(
                     item.get("price", 0)
                 )
@@ -341,19 +368,23 @@ def create_order():
                     item.get("qty", 1)
                 )
 
-                if item_qty < 1:
-                    item_qty = 1
-
-                total_amount += (
-                    item_price * item_qty
-                )
-
             except (TypeError, ValueError):
 
                 return jsonify({
                     "success": False,
                     "error": "Invalid product price or quantity."
                 }), 400
+
+            if item_price < 0:
+                return jsonify({
+                    "success": False,
+                    "error": "Invalid product price."
+                }), 400
+
+            if item_qty < 1:
+                item_qty = 1
+
+            total_amount += item_price * item_qty
 
         order_id = (
             f"ORD-{uuid.uuid4().hex[:8].upper()}"
@@ -411,6 +442,15 @@ def file_too_large(error):
         "success": False,
         "error": "Image is too large. Maximum size is 5MB."
     }), 413
+
+
+@app.errorhandler(404)
+def not_found(error):
+
+    return jsonify({
+        "success": False,
+        "error": "API route not found."
+    }), 404
 
 
 @app.errorhandler(500)
